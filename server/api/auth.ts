@@ -26,6 +26,20 @@ authRouter.post("/login", async (req, res) => {
   res.json({ user: sanitizeUser(user), token });
 });
 
+/**
+ * Shared access-code login (legacy demo path). Verifies the code server-side
+ * and issues a real Admin session token, so RBAC works uniformly whether you
+ * signed in by password or by code.
+ */
+authRouter.post("/code", (req, res) => {
+  const { code } = req.body ?? {};
+  const expected = process.env.ACCESS_CODE || "2274";
+  if (!code || String(code) !== expected) return res.status(401).json({ error: "Invalid access code" });
+  const user = { id: 0, name: "Demo Admin", email: "demo@partneros.ai", role: "Admin", status: "active", title: "Demo", phone: "" };
+  const token = signToken({ uid: user.id, email: user.email, role: user.role });
+  res.json({ user, token });
+});
+
 /** Validate a stored session token and return the fresh user record. */
 authRouter.get("/me", async (req, res) => {
   const auth = req.headers.authorization || "";

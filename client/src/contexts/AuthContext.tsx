@@ -6,25 +6,25 @@
  */
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import type { User } from "@/lib/users";
+import { can as roleCan, type Capability } from "@/lib/permissions";
 
-const ACCESS_CODE = "2274";
 const SESSION_KEY = "partner_os_session";      // { user, token }
 const CODE_KEY = "partner_os_access_granted";  // "true"
 
 interface AuthContextValue {
-  user: User | null;          // null when signed in via shared code
+  user: User | null;
   authenticated: boolean;
   ready: boolean;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  loginWithCode: (code: string) => boolean;
+  loginWithCode: (code: string) => Promise<boolean>;
   logout: () => void;
+  can: (cap: Capability) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [codeGranted, setCodeGranted] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -34,7 +34,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const parsed = JSON.parse(raw) as { user: User };
         if (parsed?.user) setUser(parsed.user);
       }
-      if (sessionStorage.getItem(CODE_KEY) === "true") setCodeGranted(true);
     } catch {
       /* ignore corrupt session */
     }
@@ -61,26 +60,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loginWithCode = useCallback((code: string) => {
-    if (code === ACCESS_CODE) {
-      sessionStorage.setItem(CODE_KEY, "true");
-      setCodeGranted(true);
+  const loginWithCode = useCallback(async (code: string) => {
+    try {
+      const res = await fetch("/api/auth/code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) return false;
+      const data = (await res.json()) as { user: User; token: string };
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
+      setUser(data.user);
       return true;
+    } catch {
+      return false;
     }
-    return false;
   }, []);
 
   const logout = useCallback(() => {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(CODE_KEY);
     setUser(null);
-    setCodeGranted(false);
   }, []);
 
-  const authenticated = !!user || codeGranted;
+  const authenticated = !!user;
+  const can = useCallback((cap: Capability) => roleCan(user?.role, cap), [user]);
 
   return (
-    <AuthContext.Provider value={{ user, authenticated, ready, login, loginWithCode, logout }}>
+    <AuthContext.Provider value={{ user, authenticated, ready, login, loginWithCode, logout, can }}>
       {children}
     </AuthContext.Provider>
   );

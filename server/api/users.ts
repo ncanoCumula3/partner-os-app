@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { query } from "../db.js";
 import { hashPassword, sanitizeUser } from "../lib/auth.js";
+import { requireCap } from "../lib/rbac.js";
 
 export const usersRouter = Router();
 
@@ -19,7 +20,7 @@ usersRouter.get("/", async (_req, res) => {
   res.json(rows.map((r) => sanitizeUser(r.data)));
 });
 
-usersRouter.post("/", async (req, res) => {
+usersRouter.post("/", requireCap("manageUsers"), async (req, res) => {
   const u = withHashedPassword(req.body ?? {});
   const { rows } = await query(
     "INSERT INTO users (email, role, data) VALUES ($1,$2,$3) RETURNING id",
@@ -31,7 +32,7 @@ usersRouter.post("/", async (req, res) => {
   res.status(201).json(sanitizeUser(r2[0].data));
 });
 
-usersRouter.patch("/:id", async (req, res) => {
+usersRouter.patch("/:id", requireCap("manageUsers"), async (req, res) => {
   const patch = withHashedPassword(req.body ?? {});
   const { rows } = await query(
     "UPDATE users SET data = data || $2::jsonb, email = COALESCE($2->>'email', email), role = COALESCE($2->>'role', role), updated_at=now() WHERE id=$1 RETURNING data",
@@ -41,7 +42,7 @@ usersRouter.patch("/:id", async (req, res) => {
   res.json(sanitizeUser(rows[0].data));
 });
 
-usersRouter.delete("/:id", async (req, res) => {
+usersRouter.delete("/:id", requireCap("manageUsers"), async (req, res) => {
   await query("DELETE FROM users WHERE id=$1", [req.params.id]);
   res.status(204).end();
 });

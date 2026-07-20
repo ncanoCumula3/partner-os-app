@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { query } from "../db.js";
+import { requireCap } from "../lib/rbac.js";
 
 export const notesRouter = Router();
 
@@ -24,7 +25,7 @@ notesRouter.patch("/:appId", async (req, res) => {
   res.json(rows[0].data);
 });
 
-notesRouter.delete("/:appId", async (req, res) => {
+notesRouter.delete("/:appId", requireCap("delete"), async (req, res) => {
   await query("DELETE FROM notes WHERE data->>'id' = $1", [req.params.appId]);
   res.status(204).end();
 });

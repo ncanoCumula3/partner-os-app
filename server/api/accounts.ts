@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { query } from "../db.js";
+import { requireCap } from "../lib/rbac.js";
 
 export const accountsRouter = Router();
 
@@ -29,7 +30,7 @@ accountsRouter.patch("/:id", async (req, res) => {
   res.json(rows[0].data);
 });
 
-accountsRouter.delete("/:id", async (req, res) => {
+accountsRouter.delete("/:id", requireCap("delete"), async (req, res) => {
   await query("DELETE FROM accounts WHERE id=$1", [req.params.id]);
   res.status(204).end();
 });

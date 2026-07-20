@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAdminSettings } from "@/contexts/AdminSettingsContext";
 import { useUsers } from "@/contexts/UsersContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { ACCOUNTS, type Account } from "@/lib/data";
 import { roleBadgeColor, statusBadgeColor, type User } from "@/lib/users";
 import UserFormDialog from "@/components/UserFormDialog";
@@ -849,6 +850,8 @@ function AccountsTab() {
 /* ── Users management (actual people + access levels) ─────── */
 function UsersManagementCard() {
   const { users, addUser, updateUser, deleteUser } = useUsers();
+  const { can } = useAuth();
+  const canManage = can("manageUsers");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
 
@@ -861,14 +864,16 @@ function UsersManagementCard() {
       icon={Users}
       description="Team members and their access level (Admin · Account Manager · Supervisor)"
     >
-      <div className="flex justify-end -mt-1 mb-3">
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-        >
-          <Plus className="w-3.5 h-3.5" /> Add User
-        </button>
-      </div>
+      {canManage && (
+        <div className="flex justify-end -mt-1 mb-3">
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add User
+          </button>
+        </div>
+      )}
 
       <div className="space-y-2">
         {users.map((u) => {
@@ -891,20 +896,24 @@ function UsersManagementCard() {
                   {u.title && <><span className="text-muted-foreground/30">·</span><span className="truncate">{u.title}</span></>}
                 </div>
               </div>
-              <button
-                onClick={() => openEdit(u)}
-                title="Edit user"
-                className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground/40 hover:text-primary hover:bg-primary/10 transition-colors opacity-0 group-hover:opacity-100"
-              >
-                <Pencil className="w-3 h-3" />
-              </button>
-              <button
-                onClick={() => { if (confirm(`Remove ${u.name}?`)) { deleteUser(u.id); toast.success("User removed"); } }}
-                title="Remove user"
-                className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
+              {canManage && (
+                <>
+                  <button
+                    onClick={() => openEdit(u)}
+                    title="Edit user"
+                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground/40 hover:text-primary hover:bg-primary/10 transition-colors opacity-0 group-hover:opacity-100"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { if (confirm(`Remove ${u.name}?`)) { deleteUser(u.id); toast.success("User removed"); } }}
+                    title="Remove user"
+                    className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </>
+              )}
             </div>
           );
         })}

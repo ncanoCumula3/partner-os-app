@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { query } from "../db.js";
+import { requireCap } from "../lib/rbac.js";
 
 export const dealsRouter = Router();
 
@@ -20,7 +21,7 @@ dealsRouter.patch("/:id", async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: "not found" });
   res.json(rows[0].data);
 });
-dealsRouter.delete("/:id", async (req, res) => {
+dealsRouter.delete("/:id", requireCap("delete"), async (req, res) => {
   await query("DELETE FROM deals WHERE id=$1", [req.params.id]);
   res.status(204).end();
 });

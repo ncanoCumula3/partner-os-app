@@ -30,9 +30,10 @@ export default function PasswordGate({ children }: { children: React.ReactNode }
     }
   };
 
-  const handleCode = (e: React.FormEvent) => {
+  const handleCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginWithCode(code)) {
+    const ok = await loginWithCode(code);
+    if (!ok) {
       setCodeError(true);
       setCode("");
     }

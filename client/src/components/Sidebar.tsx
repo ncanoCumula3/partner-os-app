@@ -5,6 +5,8 @@
 import type { NavId } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { useAdminSettings } from "@/contexts/AdminSettingsContext";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Capability } from "@/lib/permissions";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -99,8 +101,14 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+/** Nav items that require a capability to appear. */
+const NAV_CAP: Partial<Record<NavId, Capability>> = {
+  "admin-settings": "manageSettings",
+};
+
 export default function Sidebar({ active, onNavigate, open, onToggle }: SidebarProps) {
   const { settings } = useAdminSettings();
+  const { can } = useAuth();
   const firmName = settings.general.consultingFirmName || "Acme Consulting";
 
   return (
@@ -189,7 +197,7 @@ export default function Sidebar({ active, onNavigate, open, onToggle }: SidebarP
             )}
 
             {/* Nav items */}
-            {group.items.map((item) => {
+            {group.items.filter((item) => { const c = NAV_CAP[item.id]; return !c || can(c); }).map((item) => {
               const isActive = active === item.id;
               return (
                 <button
