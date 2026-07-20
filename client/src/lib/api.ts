@@ -13,6 +13,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export const api = {
   get: <T>(path: string) => req<T>("GET", path),
   post: <T>(path: string, body: unknown) => req<T>("POST", path, body),
+  put: <T>(path: string, body: unknown) => req<T>("PUT", path, body),
   patch: <T>(path: string, body: unknown) => req<T>("PATCH", path, body),
   del: (path: string) => req<void>("DELETE", path),
 };

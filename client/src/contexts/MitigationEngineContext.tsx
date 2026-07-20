@@ -8,7 +8,8 @@
  * 4. Logs all automation events for audit trail
  * 5. Dispatches notifications to the notification center
  */
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
+import { api } from "@/lib/api";
 import type { AIRecommendation, MitigationAction, AccountRiskProfile } from "@/lib/data";
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -104,6 +105,16 @@ const genTaskId = () => `auto-task-${String(taskIdCounter++).padStart(3, "0")}`;
 const genCallId = () => `auto-call-${String(callIdCounter++).padStart(3, "0")}`;
 const genEventId = () => `auto-evt-${String(eventIdCounter++).padStart(3, "0")}`;
 const genMitId = () => `auto-mit-${String(mitigationIdCounter++).padStart(3, "0")}`;
+
+// After restoring persisted state, advance the id counters past existing ids.
+function bumpCounters(s: Partial<MitigationEngineState>) {
+  const maxNum = (arr: { id: string }[] | undefined, prefix: string) =>
+    Math.max(0, ...(arr ?? []).map((x) => parseInt(String(x.id).replace(prefix, ""), 10)).filter((n) => !Number.isNaN(n)));
+  taskIdCounter = Math.max(taskIdCounter, maxNum(s.tasks, "auto-task-") + 1);
+  callIdCounter = Math.max(callIdCounter, maxNum(s.scheduledCalls, "auto-call-") + 1);
+  eventIdCounter = Math.max(eventIdCounter, maxNum(s.automationLog, "auto-evt-") + 1);
+  mitigationIdCounter = Math.max(mitigationIdCounter, maxNum(s.generatedMitigations, "auto-mit-") + 1);
+}
 
 function addDays(days: number): string {
   const d = new Date();
@@ -318,6 +329,45 @@ export function MitigationEngineProvider({ children }: { children: ReactNode }) 
   const [generatedMitigations, setGeneratedMitigations] = useState<MitigationAction[]>(SEED_MITIGATIONS);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [lastAnalysisTime, setLastAnalysisTime] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  /* ── Load persisted engine state on mount ── */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await api.get<Partial<MitigationEngineState> | null>("/api/state/mitigation");
+        if (s && !cancelled) {
+          if (Array.isArray(s.tasks)) setTasks(s.tasks);
+          if (Array.isArray(s.scheduledCalls)) setScheduledCalls(s.scheduledCalls);
+          if (Array.isArray(s.automationLog)) setAutomationLog(s.automationLog);
+          if (Array.isArray(s.generatedMitigations)) setGeneratedMitigations(s.generatedMitigations);
+          if (s.lastAnalysisTime) setLastAnalysisTime(s.lastAnalysisTime);
+          bumpCounters(s);
+        }
+      } catch {
+        /* offline: start empty */
+      }
+      if (!cancelled) setLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* ── Persist the whole engine state whenever it changes ── */
+  useEffect(() => {
+    if (!loaded) return;
+    void api
+      .put("/api/state/mitigation", {
+        tasks,
+        scheduledCalls,
+        automationLog,
+        generatedMitigations,
+        lastAnalysisTime,
+      })
+      .catch(() => {});
+  }, [loaded, tasks, scheduledCalls, automationLog, generatedMitigations, lastAnalysisTime]);
 
   /* ── Log Event ── */
   const logEvent = useCallback((type: AutomationEventType, accountId: number, account: string, title: string, description: string, metadata?: Record<string, any>) => {
