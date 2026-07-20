@@ -16,9 +16,11 @@ import type { Account, CustomerType, LEDUrgency } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import {
   User, Calendar, Search, X, ArrowUp, ArrowDown, ArrowUpDown,
-  ChevronDown, Filter, RotateCcw, ChevronRight, CalendarClock, Eye,
+  ChevronDown, Filter, RotateCcw, ChevronRight, CalendarClock, Eye, Plus, Pencil,
 } from "lucide-react";
 import AccountDetailPanel from "@/components/AccountDetailPanel";
+import { useAccounts } from "@/contexts/AccountsContext";
+import AccountFormDialog from "@/components/AccountFormDialog";
 
 const ACCOUNTS_BG =
   "https://d2xsxph8kpxj0f.cloudfront.net/310519663541486288/dhFsWnKJaddWAqADhMbet7/accounts-visual-LcJgwXnhqLQ4tmJQaPF7td.webp";
@@ -170,6 +172,9 @@ export default function AccountsView({ onNavigateToMoment }: { onNavigateToMomen
   // Detail panel state
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const { accounts, addAccount, updateAccount } = useAccounts();
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Account | null>(null);
 
   const openDetail = useCallback((acc: Account) => {
     setSelectedAccount(acc);
@@ -201,7 +206,7 @@ export default function AccountsView({ onNavigateToMoment }: { onNavigateToMomen
   }, []);
 
   const processed = useMemo(() => {
-    let list = [...ACCOUNTS];
+    let list = [...accounts];
     if (tierFilter) list = list.filter((a) => a.tier === tierFilter);
     if (stageFilter) list = list.filter((a) => a.stage === stageFilter);
     if (typeFilter) list = list.filter((a) => a.customerType === typeFilter);
@@ -221,7 +226,7 @@ export default function AccountsView({ onNavigateToMoment }: { onNavigateToMomen
     }
     if (sortKey) list.sort((a, b) => compareFn(a, b, sortKey, sortDir));
     return list;
-  }, [query, sortKey, sortDir, tierFilter, stageFilter, typeFilter]);
+  }, [accounts, query, sortKey, sortDir, tierFilter, stageFilter, typeFilter]);
 
   const SortIcon = ({ colKey }: { colKey: SortKey }) => {
     if (sortKey !== colKey)
@@ -244,13 +249,21 @@ export default function AccountsView({ onNavigateToMoment }: { onNavigateToMomen
             className="absolute inset-0 bg-cover bg-center opacity-20"
             style={{ backgroundImage: `url(${ACCOUNTS_BG})` }}
           />
-          <div className="relative p-6 flex flex-col justify-end h-full">
-            <h2 className="text-xl font-bold text-foreground">Accounts</h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              {ACCOUNTS.length} managed accounts across{" "}
-              {new Set(ACCOUNTS.map((a) => a.platform)).size} platforms
-              <span className="text-muted-foreground/50 ml-2">· Click a row for details</span>
-            </p>
+          <div className="relative p-6 flex items-end justify-between h-full">
+            <div>
+              <h2 className="text-xl font-bold text-foreground">Accounts</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                {accounts.length} managed accounts across{" "}
+                {new Set(accounts.map((a) => a.platform)).size} platforms
+                <span className="text-muted-foreground/50 ml-2">· Click a row for details</span>
+              </p>
+            </div>
+            <button
+              onClick={() => { setEditing(null); setFormOpen(true); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-primary-foreground shadow hover:opacity-90"
+            >
+              <Plus className="w-4 h-4" /> Add Customer
+            </button>
           </div>
         </motion.div>
 
@@ -340,7 +353,7 @@ export default function AccountsView({ onNavigateToMoment }: { onNavigateToMomen
                 <span className="text-foreground font-semibold font-mono">
                   {processed.length}
                 </span>{" "}
-                of {ACCOUNTS.length} accounts
+                of {accounts.length} accounts
                 {processed.length === 0 && (
                   <span className="text-red-600 ml-1">— no matches found</span>
                 )}
@@ -487,6 +500,13 @@ export default function AccountsView({ onNavigateToMoment }: { onNavigateToMomen
                       <Eye className="w-3.5 h-3.5 text-primary" />
                     </button>
                   )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setEditing(acc); setFormOpen(true); }}
+                    className="p-1 rounded-md hover:bg-primary/10 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Edit customer"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-primary" />
+                  </button>
                   <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
                 </div>
               </motion.div>
@@ -520,6 +540,13 @@ export default function AccountsView({ onNavigateToMoment }: { onNavigateToMomen
         account={selectedAccount}
         open={panelOpen}
         onOpenChange={setPanelOpen}
+      />
+
+      <AccountFormDialog
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(data) => (editing ? updateAccount(editing.id, data) : addAccount(data))}
+        account={editing}
       />
     </>
   );

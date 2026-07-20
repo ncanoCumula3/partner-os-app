@@ -26,3 +26,12 @@ CREATE TABLE IF NOT EXISTS app_state (
   data       JSONB NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS accounts (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT,
+  platform   TEXT,
+  tier       TEXT,
+  data       JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

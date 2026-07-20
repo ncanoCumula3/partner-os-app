@@ -8,6 +8,7 @@ import { projectsRouter } from "./api/projects.js";
 import { dealsRouter } from "./api/deals.js";
 import { notesRouter } from "./api/notes.js";
 import { stateRouter } from "./api/state.js";
+import { accountsRouter } from "./api/accounts.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,6 +36,7 @@ async function startServer() {
   app.use("/api/deals", dealsRouter);
   app.use("/api/notes", notesRouter);
   app.use("/api/state", stateRouter);
+  app.use("/api/accounts", accountsRouter);
 
   // ---- static SPA (client build lives in dist/public) ----
   const staticPath = path.resolve(__dirname, "..", "dist", "public");
