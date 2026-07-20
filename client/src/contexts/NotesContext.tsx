@@ -3,7 +3,8 @@
  * Every note is tied to an account, a section (pipeline/support/outreach/csat/ar/playbooks),
  * an optional item reference, and the authoring rep.
  */
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
+import { api } from "@/lib/api";
 
 export type NoteSection = "pipeline" | "support" | "outreach" | "csat" | "ar" | "playbooks" | "renewals" | "downsell" | "general";
 
@@ -83,22 +84,40 @@ const SEED_NOTES: Note[] = [
   },
 ];
 
-let nextId = 11;
+const genId = () => `n-${Date.now().toString(36)}${Math.floor(Math.random() * 10000)}`;
 
 export function NotesProvider({ children }: { children: ReactNode }) {
-  const [notes, setNotes] = useState<Note[]>(SEED_NOTES);
+  const [notes, setNotes] = useState<Note[]>([]);
+
+  // Load from the API; seed the DB from bundled notes if it's empty.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let list = await api.get<Note[]>("/api/notes");
+        if (!list.length) {
+          await Promise.all(SEED_NOTES.map((n) => api.post("/api/notes", n)));
+          list = SEED_NOTES;
+        }
+        if (!cancelled) setNotes(list);
+      } catch {
+        if (!cancelled) setNotes(SEED_NOTES);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const addNote = useCallback((note: Omit<Note, "id" | "createdAt">) => {
-    const newNote: Note = {
-      ...note,
-      id: `n-${String(nextId++).padStart(3, "0")}`,
-      createdAt: new Date().toISOString(),
-    };
+    const newNote: Note = { ...note, id: genId(), createdAt: new Date().toISOString() };
     setNotes((prev) => [newNote, ...prev]);
+    void api.post("/api/notes", newNote).catch(() => {});
   }, []);
 
   const deleteNote = useCallback((id: string) => {
     setNotes((prev) => prev.filter((n) => n.id !== id));
+    void api.del(`/api/notes/${id}`).catch(() => {});
   }, []);
 
   const getNotesForItem = useCallback(

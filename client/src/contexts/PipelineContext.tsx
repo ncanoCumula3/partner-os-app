@@ -1,9 +1,11 @@
 /**
- * PipelineContext — Shared mutable state for pipeline deals.
- * Wraps the seed data from pipeline.ts and exposes CRUD helpers
- * so deal changes propagate immediately across all views.
+ * PipelineContext — pipeline deals, backed by the custom API.
+ * Loads from GET /api/deals (seeds the DB from bundled data on first run) and
+ * persists every mutation via POST/PATCH/DELETE. The whole deal (contacts,
+ * products, activities, notes, stage history) is stored as one JSONB row.
  */
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { api } from "@/lib/api";
 import {
   SEED_DEALS,
   DEAL_STAGES,
@@ -15,7 +17,6 @@ import {
   type DealActivity,
   type DealContact,
   type DealNote,
-  type ForecastCategory,
 } from "@/lib/pipeline";
 
 interface PipelineContextValue {
@@ -23,30 +24,18 @@ interface PipelineContextValue {
   addDeal: (deal: Omit<Deal, "id">) => Deal;
   updateDeal: (id: number, updates: Partial<Deal>) => void;
   deleteDeal: (id: number) => void;
-
-  // Stage management
   changeDealStage: (dealId: number, toStage: DealStage, reason: string, notes: string, nextSteps: string, changedBy: string) => void;
-
-  // Products
   addProduct: (dealId: number, product: Omit<DealProduct, "id">) => void;
   updateProduct: (dealId: number, productId: number, updates: Partial<DealProduct>) => void;
   removeProduct: (dealId: number, productId: number) => void;
-
-  // Activities
   addActivity: (dealId: number, activity: Omit<DealActivity, "id">) => void;
-
-  // Contacts
   addContact: (dealId: number, contact: Omit<DealContact, "id">) => void;
   updateContact: (dealId: number, contactId: number, updates: Partial<DealContact>) => void;
   removeContact: (dealId: number, contactId: number) => void;
-
-  // Notes
   addNote: (dealId: number, note: Omit<DealNote, "id">) => void;
   updateNote: (dealId: number, noteId: number, updates: Partial<DealNote>) => void;
   deleteNote: (dealId: number, noteId: number) => void;
   togglePinNote: (dealId: number, noteId: number) => void;
-
-  // Queries
   getDeal: (id: number) => Deal | undefined;
   getDealsForAccount: (accountId: number) => Deal[];
   getOpenDeals: () => Deal[];
@@ -55,159 +44,237 @@ interface PipelineContextValue {
 const PipelineContext = createContext<PipelineContextValue | null>(null);
 
 export function PipelineProvider({ children }: { children: ReactNode }) {
-  const [deals, setDeals] = useState<Deal[]>([...SEED_DEALS]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let list = await api.get<Deal[]>("/api/deals");
+        if (!list.length) {
+          list = await Promise.all(SEED_DEALS.map((d) => api.post<Deal>("/api/deals", d)));
+        }
+        if (!cancelled) setDeals(list);
+      } catch {
+        if (!cancelled) setDeals([...SEED_DEALS]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // transform one deal, update state, persist the whole deal
+  const mutateDeal = useCallback((dealId: number, transform: (d: Deal) => Deal) => {
+    setDeals((prev) =>
+      prev.map((d) => {
+        if (d.id !== dealId) return d;
+        const updated = transform(d);
+        void api.patch(`/api/deals/${dealId}`, updated).catch(() => {});
+        return updated;
+      }),
+    );
+  }, []);
 
   const addDeal = useCallback((data: Omit<Deal, "id">): Deal => {
-    const newId = Math.max(0, ...deals.map(d => d.id)) + 1;
-    const deal: Deal = { ...data, id: newId };
-    setDeals(prev => [...prev, deal]);
-    return deal;
-  }, [deals]);
-
-  const updateDeal = useCallback((id: number, updates: Partial<Deal>) => {
-    setDeals(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+    const temp: Deal = { ...(data as Deal), id: -Date.now() };
+    setDeals((prev) => [...prev, temp]);
+    api
+      .post<Deal>("/api/deals", data)
+      .then((saved) => setDeals((prev) => prev.map((d) => (d.id === temp.id ? saved : d))))
+      .catch(() => {});
+    return temp;
   }, []);
+
+  const updateDeal = useCallback(
+    (id: number, updates: Partial<Deal>) => mutateDeal(id, (d) => ({ ...d, ...updates })),
+    [mutateDeal],
+  );
 
   const deleteDeal = useCallback((id: number) => {
-    setDeals(prev => prev.filter(d => d.id !== id));
+    setDeals((prev) => prev.filter((d) => d.id !== id));
+    void api.del(`/api/deals/${id}`).catch(() => {});
   }, []);
 
-  const changeDealStage = useCallback((
-    dealId: number, toStage: DealStage, reason: string, notes: string, nextSteps: string, changedBy: string
-  ) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      const stageConfig = DEAL_STAGES.find(s => s.name === toStage);
-      const newProbability = stageConfig?.probability ?? d.probability;
-      const newChange: StageChange = {
-        id: Math.max(0, ...d.stageHistory.map(s => s.id)) + 1,
-        fromStage: d.stage,
-        toStage,
-        changedBy,
-        changedAt: new Date().toISOString().split("T")[0],
-        reason,
-        notes,
-        nextSteps,
-      };
-      // Auto-set forecast category based on stage
-      let forecastCategory = d.forecastCategory;
-      if (toStage === "Closed Won" || toStage === "Negotiation") forecastCategory = "Commit";
-      else if (toStage === "Proposal") forecastCategory = "Best Case";
-      else if (toStage === "Closed Lost") forecastCategory = "Omitted";
+  const changeDealStage = useCallback(
+    (dealId: number, toStage: DealStage, reason: string, notes: string, nextSteps: string, changedBy: string) => {
+      mutateDeal(dealId, (d) => {
+        const stageConfig = DEAL_STAGES.find((s) => s.name === toStage);
+        const newProbability = stageConfig?.probability ?? d.probability;
+        const newChange: StageChange = {
+          id: Math.max(0, ...d.stageHistory.map((s) => s.id)) + 1,
+          fromStage: d.stage,
+          toStage,
+          changedBy,
+          changedAt: new Date().toISOString().split("T")[0],
+          reason,
+          notes,
+          nextSteps,
+        };
+        let forecastCategory = d.forecastCategory;
+        if (toStage === "Closed Won" || toStage === "Negotiation") forecastCategory = "Commit";
+        else if (toStage === "Proposal") forecastCategory = "Best Case";
+        else if (toStage === "Closed Lost") forecastCategory = "Omitted";
+        return {
+          ...d,
+          stage: toStage,
+          probability: newProbability,
+          forecastCategory,
+          stageHistory: [...d.stageHistory, newChange],
+          nextStep: nextSteps || d.nextStep,
+          closedDate:
+            toStage === "Closed Won" || toStage === "Closed Lost"
+              ? new Date().toISOString().split("T")[0]
+              : d.closedDate,
+        };
+      });
+    },
+    [mutateDeal],
+  );
 
-      return {
+  const addProduct = useCallback(
+    (dealId: number, product: Omit<DealProduct, "id">) => {
+      mutateDeal(dealId, (d) => {
+        const newId = Math.max(0, ...d.products.map((p) => p.id)) + 1;
+        const newProducts = [...d.products, { ...product, id: newId }];
+        return { ...d, products: newProducts, value: getDealValue(newProducts) };
+      });
+    },
+    [mutateDeal],
+  );
+
+  const updateProduct = useCallback(
+    (dealId: number, productId: number, updates: Partial<DealProduct>) => {
+      mutateDeal(dealId, (d) => {
+        const newProducts = d.products.map((p) => (p.id === productId ? { ...p, ...updates } : p));
+        return { ...d, products: newProducts, value: getDealValue(newProducts) };
+      });
+    },
+    [mutateDeal],
+  );
+
+  const removeProduct = useCallback(
+    (dealId: number, productId: number) => {
+      mutateDeal(dealId, (d) => {
+        const newProducts = d.products.map((p) =>
+          p.id === productId ? { ...p, status: "Removed" as const } : p,
+        );
+        return { ...d, products: newProducts, value: getDealValue(newProducts) };
+      });
+    },
+    [mutateDeal],
+  );
+
+  const addActivity = useCallback(
+    (dealId: number, activity: Omit<DealActivity, "id">) => {
+      mutateDeal(dealId, (d) => {
+        const newId = Math.max(0, ...d.activities.map((a) => a.id)) + 1;
+        return { ...d, activities: [{ ...activity, id: newId }, ...d.activities] };
+      });
+    },
+    [mutateDeal],
+  );
+
+  const addContact = useCallback(
+    (dealId: number, contact: Omit<DealContact, "id">) => {
+      mutateDeal(dealId, (d) => {
+        const newId = Math.max(0, ...d.contacts.map((c) => c.id)) + 1;
+        return { ...d, contacts: [...d.contacts, { ...contact, id: newId }] };
+      });
+    },
+    [mutateDeal],
+  );
+
+  const updateContact = useCallback(
+    (dealId: number, contactId: number, updates: Partial<DealContact>) => {
+      mutateDeal(dealId, (d) => ({
         ...d,
-        stage: toStage,
-        probability: newProbability,
-        forecastCategory,
-        stageHistory: [...d.stageHistory, newChange],
-        nextStep: nextSteps || d.nextStep,
-        closedDate: (toStage === "Closed Won" || toStage === "Closed Lost") ? new Date().toISOString().split("T")[0] : d.closedDate,
-      };
-    }));
-  }, []);
+        contacts: d.contacts.map((c) => (c.id === contactId ? { ...c, ...updates } : c)),
+      }));
+    },
+    [mutateDeal],
+  );
 
-  // Products
-  const addProduct = useCallback((dealId: number, product: Omit<DealProduct, "id">) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      const newId = Math.max(0, ...d.products.map(p => p.id)) + 1;
-      const newProducts = [...d.products, { ...product, id: newId }];
-      return { ...d, products: newProducts, value: getDealValue(newProducts) };
-    }));
-  }, []);
+  const removeContact = useCallback(
+    (dealId: number, contactId: number) => {
+      mutateDeal(dealId, (d) => ({ ...d, contacts: d.contacts.filter((c) => c.id !== contactId) }));
+    },
+    [mutateDeal],
+  );
 
-  const updateProduct = useCallback((dealId: number, productId: number, updates: Partial<DealProduct>) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      const newProducts = d.products.map(p => p.id === productId ? { ...p, ...updates } : p);
-      return { ...d, products: newProducts, value: getDealValue(newProducts) };
-    }));
-  }, []);
+  const addNote = useCallback(
+    (dealId: number, note: Omit<DealNote, "id">) => {
+      mutateDeal(dealId, (d) => {
+        const newId = Math.max(0, ...d.notes.map((n) => n.id)) + 1;
+        return { ...d, notes: [{ ...note, id: newId }, ...d.notes] };
+      });
+    },
+    [mutateDeal],
+  );
 
-  const removeProduct = useCallback((dealId: number, productId: number) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      const newProducts = d.products.map(p => p.id === productId ? { ...p, status: "Removed" as const } : p);
-      return { ...d, products: newProducts, value: getDealValue(newProducts) };
-    }));
-  }, []);
+  const updateNote = useCallback(
+    (dealId: number, noteId: number, updates: Partial<DealNote>) => {
+      mutateDeal(dealId, (d) => ({
+        ...d,
+        notes: d.notes.map((n) =>
+          n.id === noteId ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n,
+        ),
+      }));
+    },
+    [mutateDeal],
+  );
 
-  // Activities
-  const addActivity = useCallback((dealId: number, activity: Omit<DealActivity, "id">) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      const newId = Math.max(0, ...d.activities.map(a => a.id)) + 1;
-      return { ...d, activities: [{ ...activity, id: newId }, ...d.activities] };
-    }));
-  }, []);
+  const deleteNote = useCallback(
+    (dealId: number, noteId: number) => {
+      mutateDeal(dealId, (d) => ({ ...d, notes: d.notes.filter((n) => n.id !== noteId) }));
+    },
+    [mutateDeal],
+  );
 
-  // Contacts
-  const addContact = useCallback((dealId: number, contact: Omit<DealContact, "id">) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      const newId = Math.max(0, ...d.contacts.map(c => c.id)) + 1;
-      return { ...d, contacts: [...d.contacts, { ...contact, id: newId }] };
-    }));
-  }, []);
+  const togglePinNote = useCallback(
+    (dealId: number, noteId: number) => {
+      mutateDeal(dealId, (d) => ({
+        ...d,
+        notes: d.notes.map((n) => (n.id === noteId ? { ...n, isPinned: !n.isPinned } : n)),
+      }));
+    },
+    [mutateDeal],
+  );
 
-  const updateContact = useCallback((dealId: number, contactId: number, updates: Partial<DealContact>) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      return { ...d, contacts: d.contacts.map(c => c.id === contactId ? { ...c, ...updates } : c) };
-    }));
-  }, []);
-
-  const removeContact = useCallback((dealId: number, contactId: number) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      return { ...d, contacts: d.contacts.filter(c => c.id !== contactId) };
-    }));
-  }, []);
-
-  // Notes
-  const addNote = useCallback((dealId: number, note: Omit<DealNote, "id">) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      const newId = Math.max(0, ...d.notes.map(n => n.id)) + 1;
-      return { ...d, notes: [{ ...note, id: newId }, ...d.notes] };
-    }));
-  }, []);
-
-  const updateNote = useCallback((dealId: number, noteId: number, updates: Partial<DealNote>) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      return { ...d, notes: d.notes.map(n => n.id === noteId ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n) };
-    }));
-  }, []);
-
-  const deleteNote = useCallback((dealId: number, noteId: number) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      return { ...d, notes: d.notes.filter(n => n.id !== noteId) };
-    }));
-  }, []);
-
-  const togglePinNote = useCallback((dealId: number, noteId: number) => {
-    setDeals(prev => prev.map(d => {
-      if (d.id !== dealId) return d;
-      return { ...d, notes: d.notes.map(n => n.id === noteId ? { ...n, isPinned: !n.isPinned } : n) };
-    }));
-  }, []);
-
-  // Queries
-  const getDeal = useCallback((id: number) => deals.find(d => d.id === id), [deals]);
-  const getDealsForAccount = useCallback((accountId: number) => deals.filter(d => d.accountId === accountId), [deals]);
-  const getOpenDeals = useCallback(() => deals.filter(d => d.stage !== "Closed Won" && d.stage !== "Closed Lost"), [deals]);
+  const getDeal = useCallback((id: number) => deals.find((d) => d.id === id), [deals]);
+  const getDealsForAccount = useCallback(
+    (accountId: number) => deals.filter((d) => d.accountId === accountId),
+    [deals],
+  );
+  const getOpenDeals = useCallback(
+    () => deals.filter((d) => d.stage !== "Closed Won" && d.stage !== "Closed Lost"),
+    [deals],
+  );
 
   return (
-    <PipelineContext.Provider value={{
-      deals, addDeal, updateDeal, deleteDeal, changeDealStage,
-      addProduct, updateProduct, removeProduct,
-      addActivity, addContact, updateContact, removeContact,
-      addNote, updateNote, deleteNote, togglePinNote,
-      getDeal, getDealsForAccount, getOpenDeals,
-    }}>
+    <PipelineContext.Provider
+      value={{
+        deals,
+        addDeal,
+        updateDeal,
+        deleteDeal,
+        changeDealStage,
+        addProduct,
+        updateProduct,
+        removeProduct,
+        addActivity,
+        addContact,
+        updateContact,
+        removeContact,
+        addNote,
+        updateNote,
+        deleteNote,
+        togglePinNote,
+        getDeal,
+        getDealsForAccount,
+        getOpenDeals,
+      }}
+    >
       {children}
     </PipelineContext.Provider>
   );
