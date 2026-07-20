@@ -10,6 +10,7 @@ import { AdminSettingsProvider } from "./contexts/AdminSettingsContext";
 import { ProjectsProvider } from "./contexts/ProjectsContext";
 import { PipelineProvider } from "./contexts/PipelineContext";
 import { AccountsProvider } from "./contexts/AccountsContext";
+import { UsersProvider } from "./contexts/UsersContext";
 import Dashboard from "./pages/Dashboard";
 
 function Router() {
@@ -30,6 +31,7 @@ function App() {
             <MitigationEngineProvider>
             <AdminSettingsProvider>
             <AccountsProvider>
+            <UsersProvider>
             <ProjectsProvider>
             <PipelineProvider>
             <TooltipProvider>
@@ -38,6 +40,7 @@ function App() {
             </TooltipProvider>
             </PipelineProvider>
             </ProjectsProvider>
+            </UsersProvider>
             </AccountsProvider>
             </AdminSettingsProvider>
             </MitigationEngineProvider>

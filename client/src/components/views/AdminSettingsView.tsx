@@ -7,7 +7,10 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAdminSettings } from "@/contexts/AdminSettingsContext";
+import { useUsers } from "@/contexts/UsersContext";
 import { ACCOUNTS, type Account } from "@/lib/data";
+import { roleBadgeColor, statusBadgeColor, type User } from "@/lib/users";
+import UserFormDialog from "@/components/UserFormDialog";
 import { toast } from "sonner";
 import {
   Settings2, Bell, CalendarClock, ShieldAlert, Building2, Users,
@@ -843,6 +846,86 @@ function AccountsTab() {
   );
 }
 
+/* ── Users management (actual people + access levels) ─────── */
+function UsersManagementCard() {
+  const { users, addUser, updateUser, deleteUser } = useUsers();
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<User | null>(null);
+
+  const openAdd = () => { setEditing(null); setFormOpen(true); };
+  const openEdit = (u: User) => { setEditing(u); setFormOpen(true); };
+
+  return (
+    <SectionCard
+      title="Users"
+      icon={Users}
+      description="Team members and their access level (Admin · Account Manager · Supervisor)"
+    >
+      <div className="flex justify-end -mt-1 mb-3">
+        <button
+          onClick={openAdd}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add User
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {users.map((u) => {
+          const rc = roleBadgeColor[u.role];
+          const scb = statusBadgeColor[u.status];
+          return (
+            <div key={u.id} className="flex items-center gap-3 py-2 px-1 border-b border-border/30 last:border-0 group">
+              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-[11px] font-bold text-primary shrink-0">
+                {u.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-foreground truncate">{u.name}</span>
+                  <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-semibold", rc.bg, rc.text)}>{u.role}</span>
+                  <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-medium", scb.bg, scb.text)}>{u.status}</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground/70">
+                  <Mail className="w-2.5 h-2.5" />
+                  <span className="truncate">{u.email}</span>
+                  {u.title && <><span className="text-muted-foreground/30">·</span><span className="truncate">{u.title}</span></>}
+                </div>
+              </div>
+              <button
+                onClick={() => openEdit(u)}
+                title="Edit user"
+                className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground/40 hover:text-primary hover:bg-primary/10 transition-colors opacity-0 group-hover:opacity-100"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => { if (confirm(`Remove ${u.name}?`)) { deleteUser(u.id); toast.success("User removed"); } }}
+                title="Remove user"
+                className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          );
+        })}
+        {users.length === 0 && (
+          <p className="text-xs text-muted-foreground py-6 text-center">No users yet — add your first team member.</p>
+        )}
+      </div>
+
+      <UserFormDialog
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        user={editing}
+        onSubmit={(data) => {
+          if (editing) { updateUser(editing.id, data); toast.success("User updated"); }
+          else { addUser(data); toast.success("User added"); }
+        }}
+      />
+    </SectionCard>
+  );
+}
+
 /* ── Team Tab ─────────────────────────────────────────────── */
 function TeamTab() {
   const { settings, updateTeam } = useAdminSettings();
@@ -850,6 +933,8 @@ function TeamTab() {
 
   return (
     <div className="space-y-5">
+      <UsersManagementCard />
+
       <SectionCard title="Roles & Permissions" icon={Shield} description="Define roles and their access levels">
         <div className="space-y-3">
           {t.roles.map((role) => (
