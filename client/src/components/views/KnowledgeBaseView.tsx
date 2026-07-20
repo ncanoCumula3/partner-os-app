@@ -11,7 +11,11 @@ import {
   ChevronRight, ArrowLeft, X, Star, CheckCircle2, AlertTriangle,
   Lightbulb, Shield, TrendingUp, LifeBuoy, Zap, Award,
   MessageSquare, User, Building2, Copy, Check, Bookmark, BookmarkCheck,
+  Plus, Pencil, Trash2,
 } from "lucide-react";
+import { useCollection } from "@/lib/useCollection";
+import RecordFormDialog, { type FieldSpec } from "@/components/RecordFormDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 /* ── Types ──────────────────────────────────────────────────── */
 interface KBArticle {
@@ -338,8 +342,26 @@ const difficultyColors: Record<string, string> = {
   Advanced: "text-red-600 bg-red-500/10 border-red-200",
 };
 
+const KB_FIELDS: FieldSpec[] = [
+  { key: "title", label: "Title", full: true, required: true },
+  { key: "summary", label: "Summary", type: "textarea", required: true },
+  { key: "category", label: "Category" },
+  { key: "platform", label: "Platform", type: "select", options: ["All", "NetSuite", "Salesforce", "HubSpot"] },
+  { key: "role", label: "Role", type: "select", options: ["Support", "Account Manager", "Sales", "Manager"] },
+  { key: "difficulty", label: "Difficulty", type: "select", options: ["Beginner", "Intermediate", "Advanced"] },
+  { key: "tags", label: "Tags", type: "list" },
+  { key: "resolution", label: "Resolution", type: "textarea" },
+  { key: "resolutionSteps", label: "Resolution steps", type: "list" },
+];
+
 /* ── Main Component ─────────────────────────────────────────── */
 export default function KnowledgeBaseView() {
+  const { can } = useAuth();
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const { items: articles, upsert, remove } = useCollection<KBArticle>("kb_articles", KB_ARTICLES as KBArticle[], (a) => a.id);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<KBArticle | null>(null);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [platformFilter, setPlatformFilter] = useState<string | null>(null);
@@ -351,7 +373,7 @@ export default function KnowledgeBaseView() {
   const [copied, setCopied] = useState(false);
 
   const filteredArticles = useMemo(() => {
-    let results = KB_ARTICLES;
+    let results = articles;
 
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -377,7 +399,7 @@ export default function KnowledgeBaseView() {
     });
 
     return results;
-  }, [search, categoryFilter, platformFilter, roleFilter, sortBy]);
+  }, [articles, search, categoryFilter, platformFilter, roleFilter, sortBy]);
 
   const hasFilters = categoryFilter || platformFilter || roleFilter;
 
@@ -586,8 +608,13 @@ export default function KnowledgeBaseView() {
           </div>
           <div>
             <h2 className="text-xl font-bold text-foreground">Knowledge Base</h2>
-            <p className="text-xs text-muted-foreground">{KB_ARTICLES.length} articles · Search past issues and top-scored resolutions</p>
+            <p className="text-xs text-muted-foreground">{articles.length} articles · Search past issues and top-scored resolutions</p>
           </div>
+          {canEdit && (
+            <button onClick={() => { setEditing(null); setFormOpen(true); }} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90">
+              <Plus className="w-3.5 h-3.5" /> Add Article
+            </button>
+          )}
         </div>
       </motion.div>
 
@@ -650,7 +677,7 @@ export default function KnowledgeBaseView() {
 
         {/* Results count */}
         <div className="text-[11px] text-muted-foreground/50">
-          Showing {filteredArticles.length} of {KB_ARTICLES.length} articles
+          Showing {filteredArticles.length} of {articles.length} articles
         </div>
       </motion.div>
 
@@ -739,8 +766,20 @@ export default function KnowledgeBaseView() {
                       </div>
                     </div>
 
-                    {/* Bookmark + Arrow */}
+                    {/* Bookmark + Edit/Delete + Arrow */}
                     <div className="flex flex-col items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1">
+                        {canEdit && (
+                          <span role="button" onClick={(e) => { e.stopPropagation(); setEditing(article); setFormOpen(true); }} title="Edit" className="p-1 rounded hover:bg-primary/10 cursor-pointer">
+                            <Pencil className="w-3.5 h-3.5 text-primary" />
+                          </span>
+                        )}
+                        {canDelete && (
+                          <span role="button" onClick={(e) => { e.stopPropagation(); if (confirm("Delete article?")) remove(article.id); }} title="Delete" className="p-1 rounded hover:bg-red-500/10 cursor-pointer">
+                            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          </span>
+                        )}
+                      </div>
                       <div
                         onClick={(e) => { e.stopPropagation(); handleBookmark(article.id); }}
                         className="cursor-pointer p-1 rounded hover:bg-muted/30 transition-colors"
@@ -770,6 +809,16 @@ export default function KnowledgeBaseView() {
           </motion.div>
         )}
       </div>
+
+      <RecordFormDialog<KBArticle>
+        open={formOpen}
+        title={editing ? "Edit Article" : "Add Article"}
+        fields={KB_FIELDS}
+        record={editing}
+        defaults={{ platform: "All", role: "Support", difficulty: "Beginner", tags: [], resolutionSteps: [], upvotes: 0, views: 0, author: "You", authorRole: "Editor", content: "", relatedTickets: [], createdAt: "2026-06-11", updatedAt: "2026-06-11" }}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(rec) => { if (!rec.id) rec.id = `KB-${Date.now() % 100000}`; upsert(rec, editing ? editing.id : undefined); }}
+      />
     </div>
   );
 }

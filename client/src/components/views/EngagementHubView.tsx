@@ -22,8 +22,12 @@ import {
   BookOpen, Video, CalendarDays, Newspaper, Pencil, ExternalLink,
   Users, TrendingUp, MailOpen, MousePointer, Reply, ChevronDown,
   Layers, Star, Download, Share2, Plus, X, Check,
+  Trash2,
 } from "lucide-react";
 import ActivityNotes from "@/components/ActivityNotes";
+import { useCollection } from "@/lib/useCollection";
+import RecordFormDialog, { type FieldSpec } from "@/components/RecordFormDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 /* ══════════════════════════════════════════════════════════════
    TYPES
@@ -268,6 +272,21 @@ const formatConfig: Record<string, { icon: React.ElementType; label: string }> =
 };
 
 /* ══════════════════════════════════════════════════════════════
+   CAMPAIGNS (editable) — CRUD wiring
+   ══════════════════════════════════════════════════════════════ */
+
+type OutreachCampaign = OutreachItem;
+
+const CAMPAIGN_FIELDS: FieldSpec[] = [
+  { key: "account", label: "Account", required: true },
+  { key: "type", label: "Type", type: "select", options: ["Upsell Sequence", "Re-engagement", "QBR Invite", "Health Check Follow-up"] },
+  { key: "status", label: "Status", type: "select", options: ["Active", "Scheduled", "Draft"] },
+  { key: "step", label: "Step", placeholder: "Step 1 of 5" },
+  { key: "opens", label: "Opens", placeholder: "0/0" },
+  { key: "nextDate", label: "Next date", placeholder: "Apr 12" },
+];
+
+/* ══════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════ */
 
@@ -283,12 +302,20 @@ export default function EngagementHubView() {
   const [pushSelectedContent, setPushSelectedContent] = useState<ContentItem[]>([]);
   const [pushSelectedAccounts, setPushSelectedAccounts] = useState<string[]>([]);
 
+  /* Campaigns — editable collection (CRUD) */
+  const { can } = useAuth();
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const { items: campaigns, upsert, remove } = useCollection<OutreachCampaign>("campaigns", OUTREACH as OutreachCampaign[], (c) => c.account);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<OutreachCampaign | null>(null);
+
   const selectedDetail = selectedSequence ? OUTREACH_DETAILS[selectedSequence] : null;
   const toggleDrill = (key: string) => setDrillDownKpi(prev => prev === key ? null : key);
 
-  const activeSeqs = OUTREACH.filter(o => o.status === "Active");
-  const scheduledSeqs = OUTREACH.filter(o => o.status === "Scheduled");
-  const draftSeqs = OUTREACH.filter(o => o.status === "Draft");
+  const activeSeqs = campaigns.filter(o => o.status === "Active");
+  const scheduledSeqs = campaigns.filter(o => o.status === "Scheduled");
+  const draftSeqs = campaigns.filter(o => o.status === "Draft");
 
   /* Content library filtering */
   const filteredContent = useMemo(() => {
@@ -452,9 +479,18 @@ export default function EngagementHubView() {
               )}
             </AnimatePresence>
 
+            {/* Add Campaign */}
+            {canEdit && (
+              <div className="flex justify-end">
+                <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90">
+                  <Plus className="w-3.5 h-3.5" /> Add Campaign
+                </button>
+              </div>
+            )}
+
             {/* Sequence cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {OUTREACH.map((o, i) => (
+              {campaigns.map((o, i) => (
                 <motion.div
                   key={o.account}
                   initial={{ opacity: 0, y: 12 }}
@@ -474,6 +510,8 @@ export default function EngagementHubView() {
                       <span className={cn("text-[10px] px-2 py-0.5 rounded-md font-medium", statusColors[o.status])}>
                         {o.status}
                       </span>
+                      {canEdit && <button onClick={(e) => { e.stopPropagation(); setEditing(o); setFormOpen(true); }} title="Edit" className="p-1 rounded hover:bg-primary/10"><Pencil className="w-3.5 h-3.5 text-primary" /></button>}
+                      {canDelete && <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete campaign?")) remove(o.account); }} title="Delete" className="p-1 rounded hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
                       <ChevronRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   </div>
@@ -992,6 +1030,17 @@ export default function EngagementHubView() {
           {selectedPush && <PushDetail push={selectedPush} />}
         </SheetContent>
       </Sheet>
+
+      {/* Campaign Add/Edit Dialog */}
+      <RecordFormDialog<OutreachCampaign>
+        open={formOpen}
+        title={editing ? "Edit Campaign" : "Add Campaign"}
+        fields={CAMPAIGN_FIELDS}
+        record={editing}
+        defaults={{ type: "Upsell Sequence", status: "Draft", opens: "0/0", step: "Step 1 of 5", nextDate: "—" }}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(rec) => { upsert(rec, editing ? editing.account : undefined); }}
+      />
     </div>
   );
 }

@@ -17,24 +17,30 @@ import {
   TrendingDown, Minus, MessageSquare, Star, ArrowUpRight,
   BarChart3, Zap, Clock, ThumbsUp, ThumbsDown, UserPlus, AlertTriangle, CheckCircle2, Phone,
   Search, ArrowUpDown, ArrowUp, ArrowDown, X,
+  Plus, Pencil, Trash2,
 } from "lucide-react";
 import ActivityNotes from "@/components/ActivityNotes";
+import { useCollection } from "@/lib/useCollection";
+import RecordFormDialog, { type FieldSpec } from "@/components/RecordFormDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface CSATEntry {
   id: number;
   account: string;
   score: number;
-  comment: string;
+  comment?: string;
   sentiment: "positive" | "neutral" | "negative";
-  respondent: string;
-  surveyDate: string;
-  surveyType: string;
+  respondent?: string;
+  surveyDate?: string;
+  surveyType?: string;
   previousScore: number;
   trend: "up" | "down" | "stable";
-  detailedFeedback: string;
-  actionItems: string[];
-  history: { date: string; score: number; comment: string }[];
+  detailedFeedback?: string;
+  actionItems?: string[];
+  history?: { date: string; score: number; comment: string }[];
 }
+
+export type CsatEntry = CSATEntry;
 
 const csatData: CSATEntry[] = [
   {
@@ -120,6 +126,18 @@ const csatData: CSATEntry[] = [
   },
 ];
 
+const CSAT_FIELDS: FieldSpec[] = [
+  { key: "account", label: "Account", required: true },
+  { key: "score", label: "Score (1-5)", type: "number", required: true },
+  { key: "comment", label: "Comment", full: true },
+  { key: "respondent", label: "Respondent" },
+  { key: "surveyDate", label: "Survey date", placeholder: "Apr 8, 2026" },
+  { key: "surveyType", label: "Survey type", placeholder: "Quarterly NPS" },
+  { key: "previousScore", label: "Previous score", type: "number" },
+  { key: "detailedFeedback", label: "Detailed feedback", type: "textarea" },
+  { key: "actionItems", label: "Action items", type: "list" },
+];
+
 const sentimentConfig = {
   positive: { bg: "bg-emerald-600/10", text: "text-emerald-700", border: "border-emerald-200" },
   neutral: { bg: "bg-amber-500/10", text: "text-amber-600", border: "border-amber-200" },
@@ -130,6 +148,12 @@ type CSATSortField = "score" | "account" | "date";
 type CSATSortDir = "asc" | "desc";
 
 export default function CSATView() {
+  const { can } = useAuth();
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const { items: csat, upsert, remove } = useCollection<CsatEntry>("csat", csatData as CsatEntry[], (c) => c.id);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<CsatEntry | null>(null);
   const [selected, setSelected] = useState<CSATEntry | null>(null);
   const [search, setSearch] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState<string>("all");
@@ -146,12 +170,12 @@ export default function CSATView() {
     return sortDir === "asc" ? <ArrowUp className="w-3 h-3 text-primary" /> : <ArrowDown className="w-3 h-3 text-primary" />;
   };
 
-  const filtered = csatData
+  const filtered = csat
     .filter(c => {
       if (sentimentFilter !== "all" && c.sentiment !== sentimentFilter) return false;
       if (search) {
         const q = search.toLowerCase();
-        return c.account.toLowerCase().includes(q) || c.respondent.toLowerCase().includes(q) || c.comment.toLowerCase().includes(q);
+        return c.account.toLowerCase().includes(q) || (c.respondent ?? "").toLowerCase().includes(q) || (c.comment ?? "").toLowerCase().includes(q);
       }
       return true;
     })
@@ -160,26 +184,33 @@ export default function CSATView() {
       switch (sortField) {
         case "score": return dir * (a.score - b.score);
         case "account": return dir * a.account.localeCompare(b.account);
-        case "date": return dir * a.surveyDate.localeCompare(b.surveyDate);
+        case "date": return dir * (a.surveyDate ?? "").localeCompare(b.surveyDate ?? "");
         default: return 0;
       }
     });
 
-  const avgScore = (csatData.reduce((a, b) => a + b.score, 0) / csatData.length).toFixed(1);
+  const avgScore = csat.length ? (csat.reduce((a, b) => a + b.score, 0) / csat.length).toFixed(1) : "0.0";
   const hasFilters = search || sentimentFilter !== "all";
   const [drillDownKpi, setDrillDownKpi] = useState<string | null>(null);
   const toggleDrill = (key: string) => setDrillDownKpi(prev => prev === key ? null : key);
-  const positiveEntries = csatData.filter(c => c.sentiment === "positive");
-  const neutralEntries = csatData.filter(c => c.sentiment === "neutral");
-  const negativeEntries = csatData.filter(c => c.sentiment === "negative");
+  const positiveEntries = csat.filter(c => c.sentiment === "positive");
+  const neutralEntries = csat.filter(c => c.sentiment === "neutral");
+  const negativeEntries = csat.filter(c => c.sentiment === "negative");
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <h2 className="text-xl font-bold text-foreground">CSAT</h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          Customer satisfaction scores and recent feedback · Click any entry for details
-        </p>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-foreground">CSAT</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Customer satisfaction scores and recent feedback · Click any entry for details
+          </p>
+        </div>
+        {canEdit && (
+          <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90">
+            <Plus className="w-3.5 h-3.5" /> Add Response
+          </button>
+        )}
       </motion.div>
 
       {/* Summary */}
@@ -231,11 +262,11 @@ export default function CSATView() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Avg Score</p><p className="text-lg font-bold font-mono text-foreground">{avgScore}</p></div>
-                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Responses</p><p className="text-lg font-bold font-mono text-foreground">{csatData.length}</p></div>
-                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Highest</p><p className="text-lg font-bold font-mono text-emerald-600">{Math.max(...csatData.map(c => c.score))}</p></div>
-                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Lowest</p><p className="text-lg font-bold font-mono text-red-600">{Math.min(...csatData.map(c => c.score))}</p></div>
+                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Responses</p><p className="text-lg font-bold font-mono text-foreground">{csat.length}</p></div>
+                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Highest</p><p className="text-lg font-bold font-mono text-emerald-600">{csat.length ? Math.max(...csat.map(c => c.score)) : 0}</p></div>
+                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Lowest</p><p className="text-lg font-bold font-mono text-red-600">{csat.length ? Math.min(...csat.map(c => c.score)) : 0}</p></div>
                   </div>
-                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Score</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Sentiment</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Respondent</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Date</th></tr></thead><tbody className="divide-y divide-border">{csatData.sort((a, b) => b.score - a.score).map(c => (<tr key={c.id}><td className="px-3 py-2 font-medium text-foreground">{c.account}</td><td className="px-3 py-2 font-mono font-bold"><span className={cn(c.score >= 4 ? "text-emerald-600" : c.score >= 3 ? "text-amber-600" : "text-red-600")}>{c.score}</span></td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", c.sentiment === "positive" ? "bg-emerald-50 text-emerald-700" : c.sentiment === "neutral" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700")}>{c.sentiment}</span></td><td className="px-3 py-2 text-muted-foreground">{c.respondent}</td><td className="px-3 py-2 text-muted-foreground">{c.surveyDate}</td></tr>))}</tbody></table></div>
+                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Score</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Sentiment</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Respondent</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Date</th></tr></thead><tbody className="divide-y divide-border">{[...csat].sort((a, b) => b.score - a.score).map(c => (<tr key={c.id}><td className="px-3 py-2 font-medium text-foreground">{c.account}</td><td className="px-3 py-2 font-mono font-bold"><span className={cn(c.score >= 4 ? "text-emerald-600" : c.score >= 3 ? "text-amber-600" : "text-red-600")}>{c.score}</span></td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", c.sentiment === "positive" ? "bg-emerald-50 text-emerald-700" : c.sentiment === "neutral" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700")}>{c.sentiment}</span></td><td className="px-3 py-2 text-muted-foreground">{c.respondent}</td><td className="px-3 py-2 text-muted-foreground">{c.surveyDate}</td></tr>))}</tbody></table></div>
                 </div>
               )}
 
@@ -282,8 +313,8 @@ export default function CSATView() {
         </div>
         <div className="flex items-end gap-3 h-24">
           {[1, 2, 3, 4, 5].map(score => {
-            const count = csatData.filter(c => c.score === score).length;
-            const height = count > 0 ? (count / csatData.length) * 100 : 4;
+            const count = csat.filter(c => c.score === score).length;
+            const height = count > 0 ? (count / csat.length) * 100 : 4;
             return (
               <div key={score} className="flex-1 flex flex-col items-center gap-1">
                 <motion.div
@@ -383,6 +414,8 @@ export default function CSATView() {
                   <span className={cn("text-[10px] px-2 py-0.5 rounded-md font-medium capitalize", config.bg, config.text)}>
                     {f.sentiment}
                   </span>
+                  {canEdit && <button onClick={(e) => { e.stopPropagation(); setEditing(f); setFormOpen(true); }} title="Edit" className="p-1 rounded hover:bg-primary/10"><Pencil className="w-3.5 h-3.5 text-primary" /></button>}
+                  {canDelete && <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete response?")) remove(f.id); }} title="Delete" className="p-1 rounded hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
                   <ChevronRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
               </div>
@@ -397,6 +430,22 @@ export default function CSATView() {
           {selected && <CSATDetail entry={selected} />}
         </SheetContent>
       </Sheet>
+
+      <RecordFormDialog<CsatEntry>
+        open={formOpen}
+        title={editing ? "Edit Response" : "Add Response"}
+        fields={CSAT_FIELDS}
+        record={editing}
+        defaults={{ score: 5, previousScore: 5, history: [] }}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(rec) => {
+          const r: any = rec;
+          if (!r.id) r.id = Date.now();
+          r.sentiment = r.score >= 4 ? "positive" : r.score <= 2 ? "negative" : "neutral";
+          r.trend = r.score > r.previousScore ? "up" : r.score < r.previousScore ? "down" : "stable";
+          upsert(r, editing ? editing.id : undefined);
+        }}
+      />
     </div>
   );
 }
@@ -460,9 +509,9 @@ function CSATDetail({ entry }: { entry: CSATEntry }) {
         <section>
           <h3 className="text-[11px] tracking-[0.1em] uppercase text-muted-foreground font-medium mb-3">Survey Details</h3>
           <div className="space-y-3">
-            <DetailRow icon={<User className="w-3.5 h-3.5" />} label="Respondent" value={entry.respondent} />
-            <DetailRow icon={<Calendar className="w-3.5 h-3.5" />} label="Survey Date" value={entry.surveyDate} />
-            <DetailRow icon={<BarChart3 className="w-3.5 h-3.5" />} label="Survey Type" value={entry.surveyType} />
+            <DetailRow icon={<User className="w-3.5 h-3.5" />} label="Respondent" value={entry.respondent ?? "—"} />
+            <DetailRow icon={<Calendar className="w-3.5 h-3.5" />} label="Survey Date" value={entry.surveyDate ?? "—"} />
+            <DetailRow icon={<BarChart3 className="w-3.5 h-3.5" />} label="Survey Type" value={entry.surveyType ?? "—"} />
             {account && (
               <>
                 <DetailRow icon={<Globe className="w-3.5 h-3.5" />} label="Platform" value={account.platform} />
@@ -496,10 +545,10 @@ function CSATDetail({ entry }: { entry: CSATEntry }) {
         {/* Action Items */}
         <section>
           <h3 className="text-[11px] tracking-[0.1em] uppercase text-muted-foreground font-medium mb-3">
-            Action Items ({entry.actionItems.length})
+            Action Items ({(entry.actionItems ?? []).length})
           </h3>
           <div className="space-y-2">
-            {entry.actionItems.map((item, i) => (
+            {(entry.actionItems ?? []).map((item, i) => (
               <div key={i} className="flex items-start gap-3 rounded-lg border border-border p-3">
                 <ArrowUpRight className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
                 <p className="text-xs text-foreground leading-relaxed">{item}</p>
@@ -514,7 +563,7 @@ function CSATDetail({ entry }: { entry: CSATEntry }) {
         <section>
           <h3 className="text-[11px] tracking-[0.1em] uppercase text-muted-foreground font-medium mb-3">Score History</h3>
           <div className="space-y-0">
-            {entry.history.map((h, i) => (
+            {(entry.history ?? []).map((h, i) => (
               <div key={i} className="flex gap-3 pb-4 last:pb-0">
                 <div className="flex flex-col items-center">
                   <div className={cn(
@@ -523,7 +572,7 @@ function CSATDetail({ entry }: { entry: CSATEntry }) {
                   )}>
                     {h.score}
                   </div>
-                  {i < entry.history.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
+                  {i < (entry.history ?? []).length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] text-muted-foreground font-medium">{h.date}</p>

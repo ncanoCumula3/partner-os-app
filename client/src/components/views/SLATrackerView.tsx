@@ -11,8 +11,12 @@ import {
   ArrowUpRight, Bell, BellRing, ChevronDown, Filter, Search,
   LifeBuoy, Mail, Phone, Briefcase, Package, Shield,
   TrendingUp, BarChart3, Eye, User, Building2, Settings2,
+  Plus, Pencil, Trash2,
 } from "lucide-react";
 import { useAdminSettings } from "@/contexts/AdminSettingsContext";
+import { useCollection } from "@/lib/useCollection";
+import RecordFormDialog, { type FieldSpec } from "@/components/RecordFormDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 /* ── Types ──────────────────────────────────────────────────── */
 interface SLAItem {
@@ -37,6 +41,24 @@ interface SLAItem {
   createdAt: string;
   platform: string;
 }
+
+type SlaItem = SLAItem;
+
+/* ── SLA form fields (CRUD) ─────────────────────────────────── */
+const SLA_FIELDS: FieldSpec[] = [
+  { key: "ticketId", label: "Ticket ID", required: true },
+  { key: "account", label: "Account", required: true },
+  { key: "subject", label: "Subject", full: true },
+  { key: "category", label: "Category", type: "select", options: ["support","inquiry","product","consulting"] },
+  { key: "subcategory", label: "Subcategory" },
+  { key: "channel", label: "Channel", type: "select", options: ["Email","Portal","Phone","Chat"] },
+  { key: "urgency", label: "Urgency", type: "select", options: ["Critical","High","Medium","Low"] },
+  { key: "assignee", label: "Assignee" },
+  { key: "firstResponseSLA", label: "First response SLA (min)", type: "number" },
+  { key: "resolutionSLA", label: "Resolution SLA (min)", type: "number" },
+  { key: "escalateTo", label: "Escalate to" },
+  { key: "platform", label: "Platform" },
+];
 
 /* ── Mock Data ──────────────────────────────────────────────── */
 const MOCK_SLA_ITEMS: SLAItem[] = [
@@ -178,10 +200,17 @@ const categoryIcons: Record<string, React.ElementType> = {
 /* ── Main Component ─────────────────────────────────────────── */
 export default function SLATrackerView() {
   const { slaRules, settings } = useAdminSettings();
+  const { items: slaRecords, upsert, remove } = useCollection<SlaItem>("sla_items", MOCK_SLA_ITEMS as SlaItem[], (s) => s.id);
+
+  const { can } = useAuth();
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<SlaItem | null>(null);
 
   // Apply admin SLA rules to mock tickets: match by category+subcategory+channel+urgency
   const adminEnhancedItems = useMemo(() => {
-    return MOCK_SLA_ITEMS.map(item => {
+    return slaRecords.map(item => {
       // Find matching active SLA rule from admin config
       const matchingRule = slaRules.find(r =>
         r.active &&
@@ -206,7 +235,7 @@ export default function SLATrackerView() {
         notifyBefore: matchingRule.notifyBefore,
       };
     });
-  }, [slaRules]);
+  }, [slaRules, slaRecords]);
 
   const [items, setItems] = useState(adminEnhancedItems);
   const [search, setSearch] = useState("");
@@ -217,9 +246,9 @@ export default function SLATrackerView() {
   const [drillDownKpi, setDrillDownKpi] = useState<string | null>(null);
   const toggleDrill = (key: string) => setDrillDownKpi(prev => prev === key ? null : key);
 
-  // Re-sync items when admin SLA rules change
+  // Re-sync / re-seed items when admin SLA rules OR the underlying collection change
   useEffect(() => {
-    setItems(prev => prev.map(item => {
+    setItems(adminEnhancedItems.map(item => {
       const matchingRule = slaRules.find(r =>
         r.active &&
         r.category === item.category &&
@@ -252,7 +281,7 @@ export default function SLATrackerView() {
         status: newStatus,
       };
     }));
-  }, [slaRules]);
+  }, [slaRules, adminEnhancedItems]);
 
   // Simulate live countdown every 30 seconds
   useEffect(() => {
@@ -318,9 +347,16 @@ export default function SLATrackerView() {
             <p className="text-xs text-muted-foreground">Live monitoring of service level commitments across all categories</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground/40">
-          <div className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-          Live · Updates every 30s
+        <div className="flex items-center gap-3">
+          {canEdit && (
+            <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90">
+              <Plus className="w-3.5 h-3.5" /> Add SLA Item
+            </button>
+          )}
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground/40">
+            <div className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+            Live · Updates every 30s
+          </div>
         </div>
       </motion.div>
 
@@ -567,6 +603,12 @@ export default function SLATrackerView() {
                     )}
                   </div>
 
+                  {/* Edit / delete affordances */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {canEdit && <button onClick={(e) => { e.stopPropagation(); setEditing(item); setFormOpen(true); }} title="Edit" className="p-1 rounded hover:bg-primary/10"><Pencil className="w-3.5 h-3.5 text-primary" /></button>}
+                    {canDelete && <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete SLA item?")) remove(item.id); }} title="Delete" className="p-1 rounded hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
+                  </div>
+
                   {/* Expand chevron */}
                   <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} className="shrink-0">
                     <ChevronDown className="w-4 h-4 text-muted-foreground/30" />
@@ -695,6 +737,16 @@ export default function SLATrackerView() {
           </div>
         )}
       </div>
+
+      <RecordFormDialog<SlaItem>
+        open={formOpen}
+        title={editing ? "Edit SLA Item" : "Add SLA Item"}
+        fields={SLA_FIELDS}
+        record={editing}
+        defaults={{ category: "support", channel: "Email", urgency: "Medium", status: "active", firstResponseSLA: 30, firstResponseElapsed: 0, firstResponseMet: null, resolutionSLA: 240, resolutionElapsed: 0, escalationAfter: 120, notifyBefore: 30, createdAt: "Today", platform: "NetSuite" }}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(rec) => { if (!rec.id) rec.id = `sla-${Date.now() % 100000}`; upsert(rec, editing ? editing.id : undefined); }}
+      />
     </div>
   );
 }

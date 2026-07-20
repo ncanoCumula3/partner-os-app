@@ -17,8 +17,12 @@ import {
   AlertCircle, Clock, User, Calendar, Building2, Globe,
   MessageSquare, FileText, ChevronRight, Shield, ArrowUpRight,
   Phone, Mail, Send, CheckCircle2, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, X,
+  Plus, Pencil, Trash2,
 } from "lucide-react";
 import ActivityNotes from "@/components/ActivityNotes";
+import { useCollection } from "@/lib/useCollection";
+import RecordFormDialog, { type FieldSpec } from "@/components/RecordFormDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 /* ── Extended ticket data ── */
 interface TicketDetail extends Ticket {
@@ -92,7 +96,22 @@ type SortDir = "asc" | "desc";
 const priorityOrder: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 const statusOrder: Record<string, number> = { Open: 0, "In Progress": 1, Resolved: 2 };
 
+const TICKET_FIELDS: FieldSpec[] = [
+  { key: "account", label: "Account", required: true },
+  { key: "issue", label: "Issue", full: true, required: true },
+  { key: "priority", label: "Priority", type: "select", options: ["Critical","High","Medium","Low"] },
+  { key: "status", label: "Status", type: "select", options: ["Open","In Progress","Resolved"] },
+  { key: "platform", label: "Platform" },
+  { key: "age", label: "Age", placeholder: "3d" },
+];
+
 export default function SupportView() {
+  const { can } = useAuth();
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const { items: tickets, upsert, remove } = useCollection<Ticket>("tickets", TICKETS as Ticket[], (t) => t.id);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Ticket | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -110,7 +129,7 @@ export default function SupportView() {
     return sortDir === "asc" ? <ArrowUp className="w-3 h-3 text-primary" /> : <ArrowDown className="w-3 h-3 text-primary" />;
   };
 
-  const filtered = TICKETS
+  const filtered = tickets
     .filter(t => {
       if (statusFilter !== "all" && t.status !== statusFilter) return false;
       if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
@@ -132,10 +151,10 @@ export default function SupportView() {
       }
     });
 
-  const openCount = TICKETS.filter(t => t.status === "Open").length;
-  const inProgressCount = TICKETS.filter(t => t.status === "In Progress").length;
-  const resolvedCount = TICKETS.filter(t => t.status === "Resolved").length;
-  const criticalCount = TICKETS.filter(t => t.priority === "Critical").length;
+  const openCount = tickets.filter(t => t.status === "Open").length;
+  const inProgressCount = tickets.filter(t => t.status === "In Progress").length;
+  const resolvedCount = tickets.filter(t => t.status === "Resolved").length;
+  const criticalCount = tickets.filter(t => t.priority === "Critical").length;
   const selectedDetail = selected ? TICKET_DETAILS[selected] : null;
   const hasFilters = search || statusFilter !== "all" || priorityFilter !== "all";
   const [drillDownKpi, setDrillDownKpi] = useState<string | null>(null);
@@ -145,15 +164,22 @@ export default function SupportView() {
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <h2 className="text-xl font-bold text-foreground">Support</h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          {TICKETS.length} tickets · {openCount} open · {criticalCount} critical · Click any ticket for details
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-xs text-muted-foreground mt-1">
+            {tickets.length} tickets · {openCount} open · {criticalCount} critical · Click any ticket for details
+          </p>
+          {canEdit && (
+            <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90">
+              <Plus className="w-3.5 h-3.5" /> Add Ticket
+            </button>
+          )}
+        </div>
       </motion.div>
 
       {/* Summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: "Total Tickets", value: String(TICKETS.length), color: "text-foreground", key: "total" },
+          { label: "Total Tickets", value: String(tickets.length), color: "text-foreground", key: "total" },
           { label: "Open", value: String(openCount), color: "text-red-600", key: "open" },
           { label: "In Progress", value: String(inProgressCount), color: "text-amber-600", key: "progress" },
           { label: "Resolved", value: String(resolvedCount), color: "text-emerald-700", key: "resolved" },
@@ -198,12 +224,12 @@ export default function SupportView() {
               {drillDownKpi === "total" && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Total</p><p className="text-lg font-bold font-mono text-foreground">{TICKETS.length}</p></div>
+                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Total</p><p className="text-lg font-bold font-mono text-foreground">{tickets.length}</p></div>
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Open</p><p className="text-lg font-bold font-mono text-red-600">{openCount}</p></div>
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">In Progress</p><p className="text-lg font-bold font-mono text-amber-600">{inProgressCount}</p></div>
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Resolved</p><p className="text-lg font-bold font-mono text-emerald-600">{resolvedCount}</p></div>
                   </div>
-                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Status</th></tr></thead><tbody className="divide-y divide-border">{TICKETS.map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", statusColors[t.status])}>{t.status}</span></td></tr>))}</tbody></table></div>
+                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Status</th></tr></thead><tbody className="divide-y divide-border">{tickets.map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", statusColors[t.status])}>{t.status}</span></td></tr>))}</tbody></table></div>
                 </div>
               )}
 
@@ -212,24 +238,24 @@ export default function SupportView() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Open Count</p><p className="text-lg font-bold font-mono text-red-600">{openCount}</p></div>
-                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Critical Open</p><p className="text-lg font-bold font-mono text-red-600">{TICKETS.filter(t => t.status === "Open" && t.priority === "Critical").length}</p></div>
-                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">High Open</p><p className="text-lg font-bold font-mono text-amber-600">{TICKETS.filter(t => t.status === "Open" && t.priority === "High").length}</p></div>
+                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Critical Open</p><p className="text-lg font-bold font-mono text-red-600">{tickets.filter(t => t.status === "Open" && t.priority === "Critical").length}</p></div>
+                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">High Open</p><p className="text-lg font-bold font-mono text-amber-600">{tickets.filter(t => t.status === "Open" && t.priority === "High").length}</p></div>
                   </div>
-                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th></tr></thead><tbody className="divide-y divide-border">{TICKETS.filter(t => t.status === "Open").map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td></tr>))}</tbody></table></div>
+                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th></tr></thead><tbody className="divide-y divide-border">{tickets.filter(t => t.status === "Open").map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td></tr>))}</tbody></table></div>
                 </div>
               )}
 
               {/* In Progress */}
               {drillDownKpi === "progress" && (
                 <div className="space-y-3">
-                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th></tr></thead><tbody className="divide-y divide-border">{TICKETS.filter(t => t.status === "In Progress").map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td></tr>))}</tbody></table></div>
+                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th></tr></thead><tbody className="divide-y divide-border">{tickets.filter(t => t.status === "In Progress").map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td></tr>))}</tbody></table></div>
                 </div>
               )}
 
               {/* Resolved */}
               {drillDownKpi === "resolved" && (
                 <div className="space-y-3">
-                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th></tr></thead><tbody className="divide-y divide-border">{TICKETS.filter(t => t.status === "Resolved").map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td></tr>))}</tbody></table></div>
+                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Ticket</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issue</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Priority</th></tr></thead><tbody className="divide-y divide-border">{tickets.filter(t => t.status === "Resolved").map(t => (<tr key={t.id}><td className="px-3 py-2 font-mono font-medium text-primary">{t.id}</td><td className="px-3 py-2 text-foreground">{t.account}</td><td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]">{t.issue}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", priorityColors[t.priority])}>{t.priority}</span></td></tr>))}</tbody></table></div>
                 </div>
               )}
             </div>
@@ -324,6 +350,12 @@ export default function SupportView() {
             <span className="text-xs text-muted-foreground">{t.platform}</span>
             <span className="text-xs text-muted-foreground font-mono flex items-center gap-1">
               <Clock className="w-3 h-3" /> {t.age}
+              {(canEdit || canDelete) && (
+                <span className="flex items-center gap-0.5 ml-1">
+                  {canEdit && <button onClick={(e) => { e.stopPropagation(); setEditing(t); setFormOpen(true); }} title="Edit" className="p-1 rounded hover:bg-primary/10"><Pencil className="w-3.5 h-3.5 text-primary" /></button>}
+                  {canDelete && <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete ticket?")) remove(t.id); }} title="Delete" className="p-1 rounded hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
+                </span>
+              )}
             </span>
           </motion.div>
         ))}
@@ -335,6 +367,16 @@ export default function SupportView() {
           {selectedDetail && <TicketDetail ticket={selectedDetail} />}
         </SheetContent>
       </Sheet>
+
+      <RecordFormDialog<Ticket>
+        open={formOpen}
+        title={editing ? "Edit Ticket" : "Add Ticket"}
+        fields={TICKET_FIELDS}
+        record={editing}
+        defaults={{ priority: "Medium", status: "Open", age: "0d" }}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(rec) => { if (!rec.id) rec.id = `T-${Date.now() % 100000}`; upsert(rec, editing ? editing.id : undefined); }}
+      />
     </div>
   );
 }

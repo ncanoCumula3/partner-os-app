@@ -18,8 +18,12 @@ import {
   FileText, User, Receipt, AlertTriangle, CheckCircle2, Send,
   ArrowUpRight, CreditCard, Zap, Mail, UserPlus, Phone,
   Search, ArrowUpDown, ArrowUp, ArrowDown, X,
+  Plus, Pencil, Trash2,
 } from "lucide-react";
 import ActivityNotes from "@/components/ActivityNotes";
+import { useCollection } from "@/lib/useCollection";
+import RecordFormDialog, { type FieldSpec } from "@/components/RecordFormDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 /* ── Extended invoice data ── */
 interface InvoiceDetail extends Invoice {
@@ -110,16 +114,31 @@ function parseAmount(s: string): number {
   return parseFloat(s.replace(/[^0-9.]/g, "")) || 0;
 }
 
+const INVOICE_FIELDS: FieldSpec[] = [
+  { key: "account", label: "Account", required: true },
+  { key: "inv", label: "Invoice #", required: true, placeholder: "INV-2044" },
+  { key: "amount", label: "Amount", placeholder: "$8,400" },
+  { key: "issued", label: "Issued", placeholder: "Mar 15" },
+  { key: "due", label: "Due", placeholder: "Apr 14" },
+  { key: "status", label: "Status", type: "select", options: ["Overdue","Due Soon","Pending","Paid"] },
+];
+
 export default function ARTrackerView() {
+  const { can } = useAuth();
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const { items: invoices, upsert, remove } = useCollection<Invoice>("invoices", INVOICES as Invoice[], (i) => i.inv);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Invoice | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [drillDownKpi, setDrillDownKpi] = useState<string | null>(null);
   const toggleDrill = (key: string) => setDrillDownKpi(prev => prev === key ? null : key);
 
   // Derived AR data for drill-downs
-  const totalAR = INVOICES.reduce((s, inv) => s + parseAmount(inv.amount), 0);
-  const overdueInvoices = INVOICES.filter(inv => inv.status === "Overdue");
-  const pendingInvoices = INVOICES.filter(inv => inv.status === "Pending" || inv.status === "Due Soon");
-  const paidInvoices = INVOICES.filter(inv => inv.status === "Paid");
+  const totalAR = invoices.reduce((s, inv) => s + parseAmount(inv.amount), 0);
+  const overdueInvoices = invoices.filter(inv => inv.status === "Overdue");
+  const pendingInvoices = invoices.filter(inv => inv.status === "Pending" || inv.status === "Due Soon");
+  const paidInvoices = invoices.filter(inv => inv.status === "Paid");
   const overdueTotal = overdueInvoices.reduce((s, inv) => s + parseAmount(inv.amount), 0);
   const paidTotal = paidInvoices.reduce((s, inv) => s + parseAmount(inv.amount), 0);
   const [search, setSearch] = useState("");
@@ -137,7 +156,7 @@ export default function ARTrackerView() {
     return sortDir === "asc" ? <ArrowUp className="w-3 h-3 text-primary" /> : <ArrowDown className="w-3 h-3 text-primary" />;
   };
 
-  const filtered = INVOICES
+  const filtered = invoices
     .filter(inv => {
       if (statusFilter !== "all" && inv.status !== statusFilter) return false;
       if (search) {
@@ -157,16 +176,23 @@ export default function ARTrackerView() {
       }
     });
 
-  const selectedDetail = selected ? INVOICE_DETAILS[selected] : null;
+  const selectedDetail = selected ? INVOICE_DETAILS[selected] ?? null : null;
   const hasFilters = search || statusFilter !== "all";
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <h2 className="text-xl font-bold text-foreground">AR Tracker</h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          Outstanding invoices, payment status, and revenue tracking · Click any invoice for details
-        </p>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-foreground">AR Tracker</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Outstanding invoices, payment status, and revenue tracking · Click any invoice for details
+          </p>
+        </div>
+        {canEdit && (
+          <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90">
+            <Plus className="w-3.5 h-3.5" /> Add Invoice
+          </button>
+        )}
       </motion.div>
 
       {/* KPIs */}
@@ -217,12 +243,12 @@ export default function ARTrackerView() {
               {drillDownKpi === "totalAR" && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Total Invoices</p><p className="text-lg font-bold font-mono text-foreground">{INVOICES.length}</p></div>
+                    <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Total Invoices</p><p className="text-lg font-bold font-mono text-foreground">{invoices.length}</p></div>
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Total Value</p><p className="text-lg font-bold font-mono text-foreground">${(totalAR / 1000).toFixed(1)}K</p></div>
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Overdue</p><p className="text-lg font-bold font-mono text-red-600">{overdueInvoices.length}</p></div>
                     <div className="rounded-lg bg-muted/50 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Paid</p><p className="text-lg font-bold font-mono text-emerald-600">{paidInvoices.length}</p></div>
                   </div>
-                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Invoice</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Amount</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issued</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Due</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Status</th></tr></thead><tbody className="divide-y divide-border">{INVOICES.map(inv => (<tr key={inv.inv}><td className="px-3 py-2 font-mono font-medium text-primary">{inv.inv}</td><td className="px-3 py-2 text-foreground">{inv.account}</td><td className="px-3 py-2 font-mono font-medium text-foreground">{inv.amount}</td><td className="px-3 py-2 text-muted-foreground">{inv.issued}</td><td className="px-3 py-2 text-muted-foreground">{inv.due}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", inv.status === "Overdue" ? "bg-red-50 text-red-700" : inv.status === "Paid" ? "bg-emerald-50 text-emerald-700" : inv.status === "Due Soon" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700")}>{inv.status}</span></td></tr>))}</tbody></table></div>
+                  <div className="rounded-lg border border-border overflow-hidden"><table className="w-full text-xs"><thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Invoice</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Account</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Amount</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Issued</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Due</th><th className="text-left px-3 py-2 font-semibold text-muted-foreground uppercase tracking-wider">Status</th></tr></thead><tbody className="divide-y divide-border">{invoices.map(inv => (<tr key={inv.inv}><td className="px-3 py-2 font-mono font-medium text-primary">{inv.inv}</td><td className="px-3 py-2 text-foreground">{inv.account}</td><td className="px-3 py-2 font-mono font-medium text-foreground">{inv.amount}</td><td className="px-3 py-2 text-muted-foreground">{inv.issued}</td><td className="px-3 py-2 text-muted-foreground">{inv.due}</td><td className="px-3 py-2"><span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", inv.status === "Overdue" ? "bg-red-50 text-red-700" : inv.status === "Paid" ? "bg-emerald-50 text-emerald-700" : inv.status === "Due Soon" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700")}>{inv.status}</span></td></tr>))}</tbody></table></div>
                 </div>
               )}
 
@@ -341,9 +367,13 @@ export default function ARTrackerView() {
             <span className="text-xs text-foreground font-mono font-semibold">{inv.amount}</span>
             <span className="text-xs text-muted-foreground">{inv.issued}</span>
             <span className="text-xs text-muted-foreground">{inv.due}</span>
-            <span className={cn("text-[10px] px-2 py-0.5 rounded-md font-medium w-fit", statusColors[inv.status])}>
-              {inv.status}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className={cn("text-[10px] px-2 py-0.5 rounded-md font-medium w-fit", statusColors[inv.status])}>
+                {inv.status}
+              </span>
+              {canEdit && <button onClick={(e) => { e.stopPropagation(); setEditing(inv); setFormOpen(true); }} title="Edit" className="p-1 rounded hover:bg-primary/10"><Pencil className="w-3.5 h-3.5 text-primary" /></button>}
+              {canDelete && <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete invoice?")) remove(inv.inv); }} title="Delete" className="p-1 rounded hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
+            </div>
           </motion.div>
         ))}
       </motion.div>
@@ -354,6 +384,16 @@ export default function ARTrackerView() {
           {selectedDetail && <InvoiceDetailView invoice={selectedDetail} />}
         </SheetContent>
       </Sheet>
+
+      <RecordFormDialog<Invoice>
+        open={formOpen}
+        title={editing ? "Edit Invoice" : "Add Invoice"}
+        fields={INVOICE_FIELDS}
+        record={editing}
+        defaults={{ status: "Pending" }}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(rec) => { if (!rec.inv) rec.inv = `INV-${Date.now() % 100000}`; upsert(rec, editing ? editing.inv : undefined); }}
+      />
     </div>
   );
 }

@@ -17,9 +17,12 @@ import {
   ClipboardList, TrendingUp, Shield, Rocket, Handshake, Zap,
   Sparkles, ChevronRight, Clock, Users, CheckCircle2, Circle,
   ArrowRight, BookOpen, Target, AlertTriangle, Star, Calendar, Play, UserPlus,
-  CalendarClock,
+  CalendarClock, Plus, Pencil, Trash2,
 } from "lucide-react";
 import ActivityNotes from "@/components/ActivityNotes";
+import { useCollection } from "@/lib/useCollection";
+import RecordFormDialog, { type FieldSpec } from "@/components/RecordFormDialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 const iconMap: Record<string, React.ElementType> = {
   ClipboardList, TrendingUp, Shield, Rocket, Handshake, Zap, CalendarClock,
@@ -193,21 +196,42 @@ const PLAYBOOK_DETAILS: Record<string, PlaybookDetail> = {
   },
 };
 
+const PLAYBOOK_FIELDS: FieldSpec[] = [
+  { key: "title", label: "Title", full: true, required: true },
+  { key: "platform", label: "Platform", type: "select", options: ["All","Salesforce","NetSuite","HubSpot"] },
+  { key: "category", label: "Category" },
+  { key: "steps", label: "Steps", type: "number" },
+  { key: "icon", label: "Icon", type: "select", options: ["ClipboardList","TrendingUp","Shield","Rocket","Handshake","Zap","CalendarClock"] },
+];
+
 export default function PlaybooksView() {
   const [selected, setSelected] = useState<PlaybookDetail | null>(null);
+  const { can } = useAuth();
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const { items: playbooks, upsert, remove } = useCollection<Playbook>("playbooks", PLAYBOOKS as Playbook[], (p) => p.title);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Playbook | null>(null);
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <h2 className="text-xl font-bold text-foreground">Playbooks & Best Practices</h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          Proven frameworks for every consulting scenario — click any playbook for the full guide
-        </p>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-foreground">Playbooks & Best Practices</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Proven frameworks for every consulting scenario — click any playbook for the full guide
+          </p>
+        </div>
+        {canEdit && (
+          <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90">
+            <Plus className="w-3.5 h-3.5" /> Add Playbook
+          </button>
+        )}
       </motion.div>
 
       {/* Playbook grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {PLAYBOOKS.map((p, i) => {
+        {playbooks.map((p, i) => {
           const Icon = iconMap[p.icon] || ClipboardList;
           const detail = PLAYBOOK_DETAILS[p.title];
           return (
@@ -223,7 +247,11 @@ export default function PlaybooksView() {
                 <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center mb-3 group-hover:bg-primary/10 transition-colors">
                   <Icon className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                 </div>
-                <ChevronRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="flex items-center gap-1">
+                  {canEdit && <button onClick={(e) => { e.stopPropagation(); setEditing(p); setFormOpen(true); }} title="Edit" className="p-1 rounded hover:bg-primary/10"><Pencil className="w-3.5 h-3.5 text-primary" /></button>}
+                  {canDelete && <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete playbook?")) remove(p.title); }} title="Delete" className="p-1 rounded hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
+                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
               </div>
               <div className="text-[14px] font-semibold text-foreground group-hover:text-foreground transition-colors">
                 {p.title}
@@ -270,6 +298,16 @@ export default function PlaybooksView() {
           {selected && <PlaybookDetailView playbook={selected} />}
         </SheetContent>
       </Sheet>
+
+      <RecordFormDialog<Playbook>
+        open={formOpen}
+        title={editing ? "Edit Playbook" : "Add Playbook"}
+        fields={PLAYBOOK_FIELDS}
+        record={editing}
+        defaults={{ platform: "All", steps: 5, icon: "ClipboardList" }}
+        onClose={() => setFormOpen(false)}
+        onSubmit={(rec) => { upsert(rec, editing ? editing.title : undefined); }}
+      />
     </div>
   );
 }

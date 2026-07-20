@@ -43,3 +43,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+-- Generic keyed collections: powers the editable operational views
+-- (tickets, invoices, sla items, csat, kb articles, playbooks, campaigns…).
+CREATE TABLE IF NOT EXISTS collections (
+  collection TEXT NOT NULL,
+  item_id    TEXT NOT NULL,
+  data       JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (collection, item_id)
+);

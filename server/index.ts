@@ -12,6 +12,7 @@ import { accountsRouter } from "./api/accounts.js";
 import { usersRouter } from "./api/users.js";
 import { netsuiteRouter } from "./api/netsuite.js";
 import { authRouter } from "./api/auth.js";
+import { collectionsRouter } from "./api/collections.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,6 +44,7 @@ async function startServer() {
   app.use("/api/users", usersRouter);
   app.use("/api/netsuite", netsuiteRouter);
   app.use("/api/auth", authRouter);
+  app.use("/api/collections", collectionsRouter);
 
   // ---- static SPA (client build lives in dist/public) ----
   const staticPath = path.resolve(__dirname, "..", "dist", "public");
