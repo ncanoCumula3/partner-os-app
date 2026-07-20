@@ -4,6 +4,7 @@
  * SLA rules remain in SLAConfigView (already has full CRUD)
  */
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { api } from "@/lib/api";
 
 /* ── Types ──────────────────────────────────────────────────── */
 export interface NotificationSettings {
@@ -252,6 +253,42 @@ export function AdminSettingsProvider({ children }: { children: ReactNode }) {
 
   const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(savedSettings);
 
+  // Server is the source of truth: load the persisted admin document on mount
+  // (falls back to the localStorage cache / defaults already set above).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const doc = await api.get<{ settings?: AdminSettings; slaRules?: SLARule[]; lastSaved?: string } | null>(
+          "/api/state/admin",
+        );
+        if (doc && !cancelled) {
+          if (doc.settings) {
+            setSettings(doc.settings);
+            setSavedSettings(doc.settings);
+          }
+          if (Array.isArray(doc.slaRules)) setSlaRulesState(doc.slaRules);
+          if (doc.lastSaved) setLastSaved(new Date(doc.lastSaved));
+        }
+      } catch {
+        /* offline: keep localStorage/defaults */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist to localStorage (cache) AND the server document.
+  const persist = useCallback((s: AdminSettings, rules: SLARule[], saved: Date | null) => {
+    saveToStorage(STORAGE_KEY_SETTINGS, s);
+    saveToStorage(STORAGE_KEY_SLA, rules);
+    if (saved) saveToStorage(STORAGE_KEY_LAST_SAVED, saved.toISOString());
+    void api
+      .put("/api/state/admin", { settings: s, slaRules: rules, lastSaved: saved ? saved.toISOString() : null })
+      .catch(() => {});
+  }, []);
+
   const updateGeneral = useCallback((updates: Partial<GeneralSettings>) => {
     setSettings((s) => ({ ...s, general: { ...s.general, ...updates } }));
   }, []);
@@ -276,24 +313,25 @@ export function AdminSettingsProvider({ children }: { children: ReactNode }) {
     setSettings(DEFAULT_SETTINGS);
     setSavedSettings(DEFAULT_SETTINGS);
     setSlaRulesState(DEFAULT_SLA_RULES);
-    saveToStorage(STORAGE_KEY_SETTINGS, DEFAULT_SETTINGS);
-    saveToStorage(STORAGE_KEY_SLA, DEFAULT_SLA_RULES);
     localStorage.removeItem(STORAGE_KEY_LAST_SAVED);
     setLastSaved(null);
-  }, []);
+    persist(DEFAULT_SETTINGS, DEFAULT_SLA_RULES, null);
+  }, [persist]);
 
   const saveSettings = useCallback(() => {
     const now = new Date();
     setSavedSettings({ ...settings });
     setLastSaved(now);
-    saveToStorage(STORAGE_KEY_SETTINGS, settings);
-    saveToStorage(STORAGE_KEY_LAST_SAVED, now.toISOString());
-  }, [settings]);
+    persist(settings, slaRules, now);
+  }, [settings, slaRules, persist]);
 
-  const setSlaRules = useCallback((rules: SLARule[]) => {
-    setSlaRulesState(rules);
-    saveToStorage(STORAGE_KEY_SLA, rules);
-  }, []);
+  const setSlaRules = useCallback(
+    (rules: SLARule[]) => {
+      setSlaRulesState(rules);
+      persist(savedSettings, rules, lastSaved);
+    },
+    [savedSettings, lastSaved, persist],
+  );
 
   return (
     <AdminSettingsContext.Provider
