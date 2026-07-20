@@ -3,6 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import PasswordGate from "./components/PasswordGate";
+import { AuthProvider } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { NotesProvider } from "./contexts/NotesContext";
 import { MitigationEngineProvider } from "./contexts/MitigationEngineContext";
@@ -25,6 +26,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
+      <AuthProvider>
       <PasswordGate>
         <ThemeProvider>
           <NotesProvider>
@@ -47,6 +49,7 @@ function App() {
           </NotesProvider>
         </ThemeProvider>
       </PasswordGate>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }

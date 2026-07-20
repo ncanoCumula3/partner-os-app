@@ -16,6 +16,7 @@ const EMPTY: Omit<User, "id"> = {
   status: "invited",
   title: "",
   phone: "",
+  password: "",
 };
 
 interface Props {
@@ -88,6 +89,16 @@ export default function UserFormDialog({ open, onClose, onSubmit, user }: Props)
           <div>
             <label className={label}>Phone</label>
             <input className={field} value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+1 415 555 0100" />
+          </div>
+          <div className="col-span-2">
+            <label className={label}>{user ? "Reset password (leave blank to keep)" : "Login password"}</label>
+            <input
+              type="password"
+              className={field}
+              value={form.password ?? ""}
+              onChange={(e) => set("password", e.target.value)}
+              placeholder={user ? "••••••••" : "Set a password so this user can sign in"}
+            />
           </div>
 
           <div className="col-span-2 rounded-lg bg-muted/30 border border-border/50 p-3">

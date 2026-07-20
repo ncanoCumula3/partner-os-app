@@ -14,6 +14,8 @@ export interface User {
   status: UserStatus;
   title: string;
   phone: string;
+  /** Write-only: sent to the API to (re)set a login password; never returned. */
+  password?: string;
 }
 
 export const USER_ROLES: UserRole[] = ["Admin", "Account Manager", "Supervisor"];
