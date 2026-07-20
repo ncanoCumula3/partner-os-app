@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useMemo } from "react";
 import { useAdminSettings } from "@/contexts/AdminSettingsContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ACCOUNTS, healthColor, getSaaSAccountsByUrgency, daysUntilLED,
@@ -297,6 +298,7 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (id: string
   const engine = useMitigationEngine();
   const engineTasks = useMemo(() => engine.getPendingTasks(), [engine]);
   const { settings } = useAdminSettings();
+  const { user } = useAuth();
   const { projects: allServiceProjects, getActiveProjects: getActiveProjectsFn } = useProjects();
   const [drillDownKpi, setDrillDownKpi] = useState<string | null>(null);
 
@@ -342,7 +344,7 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (id: string
       >
         <Sparkles className="w-4 h-4 text-primary shrink-0" />
         <span className="text-[13px] text-foreground">
-          Good morning, {settings.general.userDisplayName?.split(" ")[0] || "Jordan"} — <span className="font-medium">3 items need your attention today</span>
+          Good morning, {(user?.name || settings.general.userDisplayName)?.split(" ")[0] || "there"} — <span className="font-medium">3 items need your attention today</span>
         </span>
       </motion.div>
 
