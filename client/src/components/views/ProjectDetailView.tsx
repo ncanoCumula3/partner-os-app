@@ -13,7 +13,7 @@ import {
   taskStatusLabels, taskStatusColors, taskPriorityColors,
   milestoneStatusColors, noteCategoryLabels, noteCategoryColors,
   type ServiceProject, type ProjectTask, type TaskStatus, type ProjectPhase,
-  type NoteCategory, type ProjectNote,
+  type NoteCategory, type ProjectNote, type ProjectStatus, type ProjectHealth,
 } from "@/lib/projects";
 import { useProjects } from "@/contexts/ProjectsContext";
 import { ACCOUNTS } from "@/lib/data";
@@ -435,7 +435,8 @@ interface ProjectDetailViewProps {
 }
 
 export default function ProjectDetailView({ projectId, onBack }: ProjectDetailViewProps) {
-  const { getProject, addTimeEntry, addNote, updateNote, deleteNote, togglePinNote } = useProjects();
+  const { getProject, updateProject, addTimeEntry, addNote, updateNote, deleteNote, togglePinNote } = useProjects();
+  const [showEdit, setShowEdit] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [taskView, setTaskView] = useState<"kanban" | "table">("kanban");
 
@@ -486,19 +487,16 @@ export default function ProjectDetailView({ projectId, onBack }: ProjectDetailVi
     e.preventDefault();
     const taskId = Number(e.dataTransfer.getData("text/plain"));
     if (!taskId) return;
-    setTasks(prev => {
-      const updated = prev.map(t =>
-        t.id === taskId ? { ...t, status: newStatus } : t
-      );
-      return updated;
-    });
+    const updated = tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t);
+    setTasks(updated);
+    updateProject(projectId, { tasks: updated });
     setDraggedTaskId(null);
     setDropTarget(null);
     const task = tasks.find(t => t.id === taskId);
     if (task) {
       toast.success(`"${task.title}" moved to ${taskStatusLabels[newStatus]}`);
     }
-  }, [tasks]);
+  }, [tasks, projectId, updateProject]);
 
   const handleDragEnd = useCallback(() => {
     setDraggedTaskId(null);
@@ -507,14 +505,14 @@ export default function ProjectDetailView({ projectId, onBack }: ProjectDetailVi
 
   // Reassignment handler
   const handleReassign = useCallback((taskId: number, newAssignee: string) => {
-    setTasks(prev =>
-      prev.map(t => t.id === taskId ? { ...t, assignee: newAssignee } : t)
-    );
+    const updated = tasks.map(t => t.id === taskId ? { ...t, assignee: newAssignee } : t);
+    setTasks(updated);
+    updateProject(projectId, { tasks: updated });
     const task = tasks.find(t => t.id === taskId);
     if (task) {
       toast.success(`"${task.title}" reassigned to ${newAssignee}`);
     }
-  }, [tasks]);
+  }, [tasks, projectId, updateProject]);
 
   // Time logging handler — updates local task state + persists via context
   const handleLogTime = useCallback((taskId: number, hours: number, description: string, person: string, date: string) => {
@@ -582,12 +580,28 @@ export default function ProjectDetailView({ projectId, onBack }: ProjectDetailVi
               </div>
             </div>
           </div>
-          <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg", hc.bg)}>
-            <div className={cn("w-2.5 h-2.5 rounded-full", hc.dot, project.health === "off_track" && "animate-pulse")} />
-            <span className={cn("text-sm font-bold", hc.text)}>{hc.label}</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowEdit(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
+              title="Edit project"
+            >
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </button>
+            <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg", hc.bg)}>
+              <div className={cn("w-2.5 h-2.5 rounded-full", hc.dot, project.health === "off_track" && "animate-pulse")} />
+              <span className={cn("text-sm font-bold", hc.text)}>{hc.label}</span>
+            </div>
           </div>
         </div>
       </div>
+
+      <ProjectEditDialog
+        open={showEdit}
+        project={project}
+        onClose={() => setShowEdit(false)}
+        onSubmit={(updates) => { updateProject(project.id, updates); toast.success("Project updated"); }}
+      />
 
       {/* Tab Navigation */}
       <div className="flex gap-1 mb-5 bg-muted/30 rounded-lg p-1 w-fit">
@@ -1244,5 +1258,133 @@ export default function ProjectDetailView({ projectId, onBack }: ProjectDetailVi
         </div>
       )}
     </>
+  );
+}
+
+// ─── Project edit dialog (core fields upsert) ──────────────────────────────
+const STATUS_OPTS: ProjectStatus[] = ["planning", "in_progress", "on_hold", "completed", "cancelled"];
+const HEALTH_OPTS: ProjectHealth[] = ["on_track", "at_risk", "off_track"];
+const PRIORITY_OPTS: ServiceProject["priority"][] = ["high", "medium", "low"];
+
+function ProjectEditDialog({
+  open, project, onClose, onSubmit,
+}: {
+  open: boolean;
+  project: ServiceProject;
+  onClose: () => void;
+  onSubmit: (updates: Partial<ServiceProject>) => void;
+}) {
+  const [form, setForm] = useState({
+    name: project.name,
+    status: project.status,
+    health: project.health,
+    priority: project.priority,
+    projectManager: project.projectManager,
+    contractValue: project.contractValue,
+    budgetConsumed: project.budgetConsumed,
+    hoursEstimated: project.hoursEstimated,
+    completionPct: project.completionPct,
+    startDate: project.startDate,
+    targetEndDate: project.targetEndDate,
+    platform: project.platform,
+    description: project.description,
+  });
+
+  useMemo(() => {
+    setForm({
+      name: project.name, status: project.status, health: project.health,
+      priority: project.priority, projectManager: project.projectManager,
+      contractValue: project.contractValue, budgetConsumed: project.budgetConsumed,
+      hoursEstimated: project.hoursEstimated, completionPct: project.completionPct,
+      startDate: project.startDate, targetEndDate: project.targetEndDate,
+      platform: project.platform, description: project.description,
+    });
+  }, [project, open]);
+
+  if (!open) return null;
+
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm(f => ({ ...f, [k]: v }));
+  const field = "w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40";
+  const label = "text-xs font-medium text-muted-foreground mb-1 block";
+
+  const submit = () => {
+    if (!form.name.trim()) return;
+    onSubmit({ ...form });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <h3 className="text-lg font-bold text-foreground">Edit Project</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <label className={label}>Project name *</label>
+            <input className={field} value={form.name} onChange={e => set("name", e.target.value)} />
+          </div>
+          <div>
+            <label className={label}>Status</label>
+            <select className={field} value={form.status} onChange={e => set("status", e.target.value as ProjectStatus)}>
+              {STATUS_OPTS.map(s => <option key={s} value={s}>{projectStatusLabels[s]}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label}>Health</label>
+            <select className={field} value={form.health} onChange={e => set("health", e.target.value as ProjectHealth)}>
+              {HEALTH_OPTS.map(h => <option key={h} value={h}>{healthColors[h].label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label}>Priority</label>
+            <select className={field} value={form.priority} onChange={e => set("priority", e.target.value as ServiceProject["priority"])}>
+              {PRIORITY_OPTS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label}>Project manager</label>
+            <input className={field} value={form.projectManager} onChange={e => set("projectManager", e.target.value)} />
+          </div>
+          <div>
+            <label className={label}>Contract value (USD)</label>
+            <input type="number" className={field} value={form.contractValue} onChange={e => set("contractValue", Number(e.target.value))} />
+          </div>
+          <div>
+            <label className={label}>Budget consumed (USD)</label>
+            <input type="number" className={field} value={form.budgetConsumed} onChange={e => set("budgetConsumed", Number(e.target.value))} />
+          </div>
+          <div>
+            <label className={label}>Hours estimated</label>
+            <input type="number" className={field} value={form.hoursEstimated} onChange={e => set("hoursEstimated", Number(e.target.value))} />
+          </div>
+          <div>
+            <label className={label}>Completion %</label>
+            <input type="number" min={0} max={100} className={field} value={form.completionPct} onChange={e => set("completionPct", Number(e.target.value))} />
+          </div>
+          <div>
+            <label className={label}>Start date</label>
+            <input type="date" className={field} value={form.startDate} onChange={e => set("startDate", e.target.value)} />
+          </div>
+          <div>
+            <label className={label}>Target end date</label>
+            <input type="date" className={field} value={form.targetEndDate} onChange={e => set("targetEndDate", e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <label className={label}>Platform</label>
+            <input className={field} value={form.platform} onChange={e => set("platform", e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <label className={label}>Description</label>
+            <textarea className={field} rows={3} value={form.description} onChange={e => set("description", e.target.value)} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 p-5 border-t border-border">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:text-foreground">Cancel</button>
+          <button onClick={submit} disabled={!form.name.trim()} className="px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-50">Save changes</button>
+        </div>
+      </div>
+    </div>
   );
 }
