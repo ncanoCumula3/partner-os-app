@@ -1,3 +1,4 @@
+import "express-async-errors"; // route async rejections -> error middleware (Express 4)
 import express from "express";
 import { createServer } from "http";
 import path from "path";
@@ -46,6 +47,14 @@ async function startServer() {
   app.use("/api/auth", authRouter);
   app.use("/api/collections", collectionsRouter);
 
+  // ---- API error handler: turn any route rejection into a clean 500 so the
+  // process never crashes (e.g. running locally without a database). Must be
+  // registered before the SPA catch-all so /api errors don't fall through to it.
+  app.use("/api", (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error("API error:", (err as Error)?.message ?? err);
+    if (!res.headersSent) res.status(500).json({ error: "server error", detail: String((err as Error)?.message ?? err).slice(0, 200) });
+  });
+
   // ---- static SPA (client build lives in dist/public) ----
   const staticPath = path.resolve(__dirname, "..", "dist", "public");
   app.use(express.static(staticPath));
@@ -69,5 +78,9 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
 }
+
+// Last-resort guards so a stray rejection never takes the server down.
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
 startServer().catch(console.error);
